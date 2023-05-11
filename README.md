@@ -13,3 +13,4 @@
 - [ ] Add a timer to keep track of how long a single object takes
 - [ ] Implement time analysis graph
 - [ ] Automatically advance camera and frame after selecting a box
+- [ ] Implement queue of n last vehicles annotated and store crops for each (to prevent double labeling).
