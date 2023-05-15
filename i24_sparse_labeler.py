@@ -150,13 +150,6 @@ class Annotator():
         return x
 
         
-    def count(self):
-        count = 0
-        for frame_data in self.data:
-            for key in frame_data.keys():
-                count += 1
-        print("{} total boxes".format(count))
-    
     def toggle_cams(self,dir):
         """dir should be -1 or 1"""
         
@@ -167,21 +160,9 @@ class Annotator():
         if self.toggle_auto:
             self.AUTO = True
         
-        if self.cameras[self.active_cam].name in ["p1c3","p1c4","p2c3","p2c4","p3c3","p3c4"]:
-            self.stride = 10
-        else:
-            self.stride = 20
     
-    def advance_cameras_to_current_ts(self):
-        for c_idx,camera in enumerate(self.cameras):
-            while camera.ts + self.ts_bias[c_idx] < self.current_ts - 1/60.0:
-                next(camera)
+    def next(self):
         
-        frames = [[cam.frame,cam.ts] for cam in self.cameras]
-        
-        self.buffer.append(frames)
-        if len(self.buffer) > self.buffer_lim:
-            self.buffer = self.buffer[1:]
       
     def advance_all(self):
         for c_idx,camera in enumerate(self.cameras):
@@ -229,43 +210,39 @@ class Annotator():
                
     def next(self):
         """
-        Advance a "frame"
+        We assume all relevant frames are pre-buffered, so all we have to do is 
+        Check whether there's another frame available to advance, advance the index,
+        and then assign the indexed frame and timestamps
         """        
         self.label_buffer = None
         
         if self.toggle_auto:
             self.AUTO = True
 
-        if self.frame_idx < len(self.data) and self.frame_idx < self.last_frame:
+        if self.frame_idx < len(self.b.frames) 
             self.frame_idx += 1
             
             
-            # if we are in the buffer, move forward one frame in the buffer
-            if self.buffer_frame_idx < -1:
-                self.buffer_frame_idx += 1
-                
-            # if we are at the end of the buffer, advance frames and store
-            else:
-                # advance cameras
-                self.advance_all()
-        else:
-            print("On last frame")
-    
+        self.frame = self.b.frame[self.frame_idx]
+        self.ts    = self.b.ts[self.frame_idx]
+        self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+
+        
     
     
     def prev(self):
-        self.label_buffer = None
-        
         if self.toggle_auto:
             self.AUTO = True
 
         
-        if self.frame_idx > 0 and self.buffer_frame_idx > -self.buffer_lim:
+        if self.frame_idx > 0:
             self.frame_idx -= 1            
-            self.buffer_frame_idx -= 1
-        else:
-            print("Cannot return to previous frame. First frame or buffer limit")
-                        
+            
+        self.frame = self.b.frame[self.frame_idx]
+        self.ts    = self.b.ts[self.frame_idx]
+        self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+        
+        
     def plot(self,extension_distance = 200):        
         plot_frames = []
         ranges = self.ranges
