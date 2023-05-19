@@ -54,16 +54,28 @@ class Annotator():
         
         include_cameras = []
         for camera in camera_names:
+            if ".pts" in camera: continue
             p = int(camera.split("P")[-1].split("C")[0])
-            c = int(camera.split("C")[-1])
+            c = int(camera.split("C")[-1].split(".")[0])
+            shortname = camera.split(".")[0]
             
-            if c == 4 and p%2 == 0:
-                include_cameras.append(camera)
+            if c == 4 and p%2 == 0 and ".h264" in camera and p< 41:
+                include_cameras.append(shortname)
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
         self.b = NVC_Buffer(im_directory,include_cameras,ctx)
-        #self.b.fill(1200)
+        
+        
+        # frame indexed data array since we'll plot by frames
+        self.data = [[] for i in range(10000)] # each frame 
+        
+        
+        self.frame_idx = 0
+        self.toggle_auto = True
+        self.AUTO = True
+
+        self.buffer(100)
         
         
         #### get homography
@@ -82,8 +94,7 @@ class Annotator():
                 self.next_obj_id = id + 1
                 
         
-        # frame indexed data array since we'll plot by frames
-        self.data = [] # each frame 
+        
         
         
         #### Initialize queue for storing last annotated crops
@@ -91,7 +102,7 @@ class Annotator():
         
         #### Initialize queue for holding predicted travel times for each camera pair and each lane
         # we use a simple 12-foot lane width assumption for this 
-        self.travel_times = np.zeros(len(self.camera_names,15))  
+        self.travel_times = np.zeros([len(self.camera_names),15])  
         
         #### Initialize list for storing [ID,time to label] sequentially for each object
         self.time_queue = []
@@ -105,7 +116,6 @@ class Annotator():
         # self.last_frame = 2700
         # self.buffer = []
         
-        self.frame_idx = 0
 
         self.cont = True
         self.new = None
@@ -123,22 +133,23 @@ class Annotator():
     
         self.colors =  np.random.rand(2000,3)
         
-        loc_cp = ".data/localizer_april_112.pt"
+        loc_cp = "/home/derek/Documents/i24/fast-trajectory-annotator/data/localizer_april_112.pt"
         self.detector = resnet50(num_classes=8)
         cp = torch.load(loc_cp)
         self.detector.load_state_dict(cp) 
         self.detector.cuda()
         
-        self.toggle_auto = True
-        self.AUTO = True
-        
-        self.stride = 1
-        self.plot_idx = 0
-        
-
         
         
-    
+        self.plot_idx = 0        
+        self.active_cam = 0
+        
+        
+    def buffer(self,n):
+        self.b.fill(n)
+        while len(self.b.frames[self.frame_idx]) == 0:
+            self.next()
+            
     def safe(self,x):
         """
         Casts single-element tensor as an variable, otherwise does nothing
@@ -160,74 +171,56 @@ class Annotator():
     def toggle_cams(self,dir):
         """dir should be -1 or 1"""
         
-        if self.active_cam + dir < len(self.seq_keys) -1 and self.active_cam + dir >= 0:
+        if self.active_cam + dir < len(self.camera_names) -1 and self.active_cam + dir >= 0:
             self.active_cam += dir
             self.plot()
        
         if self.toggle_auto:
             self.AUTO = True
         
-        if self.cameras[self.active_cam].name in ["p1c3","p1c4","p2c3","p2c4","p3c3","p3c4"]:
-            self.stride = 10
-        else:
-            self.stride = 20
     
-    def advance_cameras_to_current_ts(self):
-        for c_idx,camera in enumerate(self.cameras):
-            while camera.ts + self.ts_bias[c_idx] < self.current_ts - 1/60.0:
-                next(camera)
-        
-        frames = [[cam.frame,cam.ts] for cam in self.cameras]
-        
-        self.buffer.append(frames)
-        if len(self.buffer) > self.buffer_lim:
-            self.buffer = self.buffer[1:]
+   
       
-    def advance_all(self):
-        for c_idx,camera in enumerate(self.cameras):
-                next(camera)
+    # def advance_all(self):
+    #     for c_idx,camera in enumerate(self.cameras):
+    #             next(camera)
         
-        frames = [[cam.frame,cam.ts] for cam in self.cameras]
+    #     frames = [[cam.frame,cam.ts] for cam in self.cameras]
         
-        timestamps = {}
-        for camera in self.cameras:
-            timestamps[camera.name] = camera.ts
+    #     timestamps = {}
+    #     for camera in self.cameras:
+    #         timestamps[camera.name] = camera.ts
             
-        if len(self.all_ts) <= self.frame_idx:
-            self.all_ts.append(timestamps)
+    #     if len(self.all_ts) <= self.frame_idx:
+    #         self.all_ts.append(timestamps)
         
-        self.buffer.append(frames)
-        if len(self.buffer) > self.buffer_lim:
-            #self.buffer = self.buffer[1:]
-            del self.buffer[0]
+    #     self.buffer.append(frames)
+    #     if len(self.buffer) > self.buffer_lim:
+    #         #self.buffer = self.buffer[1:]
+    #         del self.buffer[0]
             
-    def advance_2(self,camera_idx = 0):
-        for c_idx in [camera_idx,camera_idx+1]:
-                camera = self.cameras[c_idx]
-                next(camera)
+    # def advance_2(self,camera_idx = 0):
+    #     for c_idx in [camera_idx,camera_idx+1]:
+    #             camera = self.cameras[c_idx]
+    #             next(camera)
         
-        frames = [[cam.frame,cam.ts] for cam in self.cameras]
+    #     frames = [[cam.frame,cam.ts] for cam in self.cameras]
         
-        timestamps = {}
-        for camera in self.cameras:
-            timestamps[camera.name] = camera.ts
+    #     timestamps = {}
+    #     for camera in self.cameras:
+    #         timestamps[camera.name] = camera.ts
             
-        if len(self.all_ts) <= self.frame_idx:
-            self.all_ts.append(timestamps)
+    #     if len(self.all_ts) <= self.frame_idx:
+    #         self.all_ts.append(timestamps)
         
-        self.buffer.append(frames)
-        if len(self.buffer) > self.buffer_lim:
-            #self.buffer = self.buffer[1:]
-            del self.buffer[0]
+    #     self.buffer.append(frames)
+    #     if len(self.buffer) > self.buffer_lim:
+    #         #self.buffer = self.buffer[1:]
+    #         del self.buffer[0]
      
-    def fill_buffer(self,n):
-        for i in range(n):
-            self.next()
-            if i% 100 == 0: print("On frame {}".format(self.frame_idx))
-        self.plot()
-        print("Done")
+   
                
-    def next(self):
+    def next(self,stride = 1):
         """
         Advance a "frame"
         """        
@@ -236,94 +229,84 @@ class Annotator():
         if self.toggle_auto:
             self.AUTO = True
 
-        if self.frame_idx < len(self.data) and self.frame_idx < self.last_frame:
-            self.frame_idx += 1
-            
-            
-            # if we are in the buffer, move forward one frame in the buffer
-            if self.buffer_frame_idx < -1:
-                self.buffer_frame_idx += 1
-                
-            # if we are at the end of the buffer, advance frames and store
-            else:
-                # advance cameras
-                self.advance_all()
+        if self.frame_idx+stride < len(self.b.frames):
+            self.frame_idx += stride
+            self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
         else:
             print("On last frame")
     
     
     
-    def prev(self):
+    def prev(self,stride = 1):
         self.label_buffer = None
         
         if self.toggle_auto:
             self.AUTO = True
 
         
-        if self.frame_idx > 0 and self.buffer_frame_idx > -self.buffer_lim:
-            self.frame_idx -= 1            
-            self.buffer_frame_idx -= 1
+        if self.frame_idx-stride >= 0 and len(self.b.frames[self.frame_idx-stride]) > 0:
+            self.frame_idx -= stride     
+            self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+
+
         else:
             print("Cannot return to previous frame. First frame or buffer limit")
                         
     def plot(self,extension_distance = 200):        
         plot_frames = []
-        ranges = self.ranges
+        #ranges = self.ranges
         
         
         for i in range(self.active_cam, self.active_cam+2):
-           camera = self.cameras[i]
-           cam_ts_bias =  self.ts_bias[i] # TODO!!!
-
-           frame,frame_ts = self.buffer[self.buffer_frame_idx][i]
+           frame = self.b.frames[self.frame_idx][i]
            frame = frame.copy()
            
-           # get frame objects
-           # stack objects as tensor and aggregate other data for label
-           ts_data = list(self.data[self.frame_idx].values())
-           ts_data = list(filter(lambda x: x["camera"] == camera.name,ts_data))
+           # # get frame objects
+           # # stack objects as tensor and aggregate other data for label
+           # ts_data = list(self.data[self.frame_idx].values())
+           # ts_data = list(filter(lambda x: x["camera"] == camera.name,ts_data))
            
            
-           #chg_data = list(self.port_data[self.frame_idx].values())
-           #chg_data = list(filter(lambda x: x["camera"] == camera.name,chg_data))
+           # #chg_data = list(self.port_data[self.frame_idx].values())
+           # #chg_data = list(filter(lambda x: x["camera"] == camera.name,chg_data))
            
-           #ts_data = list(filter(lambda x: x["id"] == self.get_unused_id() - 1,ts_data))
+           # #ts_data = list(filter(lambda x: x["id"] == self.get_unused_id() - 1,ts_data))
 
-           if False:
-                ts_data = [self.offset_box_y(copy.deepcopy(obj),reverse = True) for obj in ts_data]
-           ids = [item["id"] for item in ts_data]
-           if len(ts_data) > 0:
-               boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in ts_data])
+           # if False:
+           #      ts_data = [self.offset_box_y(copy.deepcopy(obj),reverse = True) for obj in ts_data]
+           # ids = [item["id"] for item in ts_data]
+           # if len(ts_data) > 0:
+           #     boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in ts_data])
                
-               # convert into image space
-               cname = [camera.name for b in boxes]
+           #     # convert into image space
+           #     cname = [camera.name for b in boxes]
 
-               im_boxes = self.chg.state_to_im(boxes,name = cname)
+           #     im_boxes = self.chg.state_to_im(boxes,name = cname)
                 
-               # plot on frame
-               frame = self.hg.plot_state_boxes(frame,boxes,name = camera.name,color = (0,255,0),secondary_color = (0,255,0),thickness = 2,jitter_px = 0)
-               frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,100,255),thickness = 2)
+           #     # plot on frame
+           #     frame = self.hg.plot_state_boxes(frame,boxes,name = camera.name,color = (0,255,0),secondary_color = (0,255,0),thickness = 2,jitter_px = 0)
+           #     frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,100,255),thickness = 2)
            
                
-               # plot labels
-               if self.TEXT:
-                   times = [item["timestamp"] for item in ts_data]
-                   classes = [item["class"] for item in ts_data]
-                   ids = [item["id"] for item in ts_data]
-                   directions = [item["direction"] for item in ts_data]
-                   directions = ["WB" if item == -1 else "EB" for item in directions]
-                   camera.frame = Data_Reader.plot_labels(None,frame,im_boxes,boxes,classes,ids,None,directions,times)
+           #     # plot labels
+           #     if self.TEXT:
+           #         times = [item["timestamp"] for item in ts_data]
+           #         classes = [item["class"] for item in ts_data]
+           #         ids = [item["id"] for item in ts_data]
+           #         directions = [item["direction"] for item in ts_data]
+           #         directions = ["WB" if item == -1 else "EB" for item in directions]
+           #         camera.frame = Data_Reader.plot_labels(None,frame,im_boxes,boxes,classes,ids,None,directions,times)
                    
-           # TEMP, to be removed after port
-           if False and len(chg_data) > 0:
-               boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in chg_data])
+           # # TEMP, to be removed after port
+           # if False and len(chg_data) > 0:
+           #     boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in chg_data])
                
-               # convert into image space
-               cname = [camera.name for b in boxes]
-               chgim_boxes = self.chg.state_to_im(boxes,name = cname)
+           #     # convert into image space
+           #     cname = [camera.name for b in boxes]
+           #     chgim_boxes = self.chg.state_to_im(boxes,name = cname)
                 
-               # plot on frame
-               frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,0,255),thickness = 1)
+           #     # plot on frame
+           #     frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,0,255),thickness = 1)
            
             
            
@@ -377,48 +360,48 @@ class Annotator():
                # except:
                #       pass
             
-           if self.LANES:
+           # if self.LANES:
                 
-                    for lane in range(-60,60,12):
-                        # get polyline coordinates in space
-                        x_curve = np.linspace(20000,30000,4000)
-                        y_curve = np.ones(x_curve.shape) * lane
-                        zeros = np.zeros(x_curve.shape)
-                        curve = np.stack([x_curve,y_curve,zeros,zeros,zeros,zeros],axis = 1)
-                        curve = torch.from_numpy(curve)
-                        cname = [camera.name for i in range(x_curve.shape[0])]
-                        curve_im = self.chg.state_to_im(curve,name = cname)
-                        #curve_im = curve_im[:,0,:]
+           #          for lane in range(-60,60,12):
+           #              # get polyline coordinates in space
+           #              x_curve = np.linspace(20000,30000,4000)
+           #              y_curve = np.ones(x_curve.shape) * lane
+           #              zeros = np.zeros(x_curve.shape)
+           #              curve = np.stack([x_curve,y_curve,zeros,zeros,zeros,zeros],axis = 1)
+           #              curve = torch.from_numpy(curve)
+           #              cname = [camera.name for i in range(x_curve.shape[0])]
+           #              curve_im = self.chg.state_to_im(curve,name = cname)
+           #              #curve_im = curve_im[:,0,:]
                        
-                        mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
-                        curve_im = curve_im[mask,:]
+           #              mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
+           #              curve_im = curve_im[mask,:]
                        
-                        curve_im = curve_im.data.numpy().astype(int)
-                        cv2.polylines(frame,[curve_im],False,(255,100,0),1)
+           #              curve_im = curve_im.data.numpy().astype(int)
+           #              cv2.polylines(frame,[curve_im],False,(255,100,0),1)
                   
-                    for tick in range(20000,30000,10):
-                                y_curve = np.linspace(-60,60,8)
-                                x_curve = y_curve *0 + tick
-                                z_curve = y_curve *0
-                                curve = np.stack([x_curve,y_curve,z_curve,z_curve,z_curve,z_curve],axis = 1)
-                                curve = torch.from_numpy(curve)
-                                cname = [camera.name for i in range(x_curve.shape[0])]
-                                curve_im = self.chg.state_to_im(curve,name = cname)
+           #          for tick in range(20000,30000,10):
+           #                      y_curve = np.linspace(-60,60,8)
+           #                      x_curve = y_curve *0 + tick
+           #                      z_curve = y_curve *0
+           #                      curve = np.stack([x_curve,y_curve,z_curve,z_curve,z_curve,z_curve],axis = 1)
+           #                      curve = torch.from_numpy(curve)
+           #                      cname = [camera.name for i in range(x_curve.shape[0])]
+           #                      curve_im = self.chg.state_to_im(curve,name = cname)
                                
-                                mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
-                                curve_im = curve_im[mask,:]
+           #                      mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
+           #                      curve_im = curve_im[mask,:]
                                
-                                curve_im = curve_im.data.numpy().astype(int)
+           #                      curve_im = curve_im.data.numpy().astype(int)
                                
-                                th = 1
-                                color = (150,150,150)
-                                if tick % 200 == 0:
-                                    th = 2
-                                    color = (255,100,0)
-                                elif tick % 40 == 0:
-                                     th = 2
+           #                      th = 1
+           #                      color = (150,150,150)
+           #                      if tick % 200 == 0:
+           #                          th = 2
+           #                          color = (255,100,0)
+           #                      elif tick % 40 == 0:
+           #                           th = 2
                                     
-                                cv2.polylines(frame,[curve_im],False,color,th)
+           #                      cv2.polylines(frame,[curve_im],False,color,th)
                    
                 
                    
@@ -434,14 +417,14 @@ class Annotator():
            
            
            
-           if self.MASK:
-               mask_im = self.mask_ims[camera.name]/255
-               blur_im = cv2.blur(frame,(17,17))
-               frame = frame*mask_im + blur_im * (1-mask_im)*0.7
+           # if self.MASK:
+           #     mask_im = self.mask_ims[camera.name]/255
+           #     blur_im = cv2.blur(frame,(17,17))
+           #     frame = frame*mask_im + blur_im * (1-mask_im)*0.7
            
            if True:
                font =  cv2.FONT_HERSHEY_SIMPLEX
-               header_text = "{} frame {}".format(camera.name,self.frame_idx)
+               header_text = "{} frame {}".format(self.camera_names[i],self.frame_idx)
                frame = cv2.putText(frame,header_text,(30,30),font,1,(255,255,255),1)
                
            plot_frames.append(frame)
@@ -2403,7 +2386,7 @@ class Annotator():
                 
            #self.cur_frame = cv2.resize(self.cur_frame,(1920,1080))
            cv2.imshow("window", self.plot_frame)
-           title = "{} {}     Frame {}/{}, Cameras {} and {}".format("R" if self.right_click else "",self.active_command,self.frame_idx,self.max_frames,self.seq_keys[self.active_cam],self.seq_keys[self.active_cam + 1])
+           title = "{} {}     Frame {}, Cameras {} and {}".format("R" if self.right_click else "",self.active_command,self.frame_idx,self.camera_names[self.active_cam],self.camera_names[self.active_cam + 1])
            cv2.setWindowTitle("window",str(title))
            
            
@@ -2558,10 +2541,9 @@ class Annotator():
 #%%    
 
 if __name__ == "__main__":
-    directory = ""
-    hg_file = ""
+    directory = "/home/derek/Data/1hz"
+    hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230503.cpkl"
     
     ann = Annotator(directory,hg_file)  
-    ann.fill_buffer(3600)
     ann.run()
     
