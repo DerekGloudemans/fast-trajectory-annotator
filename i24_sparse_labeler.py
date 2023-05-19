@@ -161,13 +161,6 @@ class Annotator():
         return x
 
         
-    def count(self):
-        count = 0
-        for frame_data in self.data:
-            for key in frame_data.keys():
-                count += 1
-        print("{} total boxes".format(count))
-    
     def toggle_cams(self,dir):
         """dir should be -1 or 1"""
         
@@ -179,6 +172,7 @@ class Annotator():
             self.AUTO = True
         
     
+    def next(self):
    
       
     # def advance_all(self):
@@ -222,7 +216,9 @@ class Annotator():
                
     def next(self,stride = 1):
         """
-        Advance a "frame"
+        We assume all relevant frames are pre-buffered, so all we have to do is 
+        Check whether there's another frame available to advance, advance the index,
+        and then assign the indexed frame and timestamps
         """        
         self.label_buffer = None
         
