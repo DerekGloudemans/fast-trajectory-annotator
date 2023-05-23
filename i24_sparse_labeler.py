@@ -543,8 +543,8 @@ class Annotator():
              
                                 
     
-    def change_class(self,obj_idx,cls):
-        self.objects[obj_idx]["class"] = cls
+    def change_class(self,obj_id,cls):
+        self.objects[obj_id]["class"] = cls
     
     def paste_in_2D_bbox(self,box):
         """
@@ -555,7 +555,10 @@ class Annotator():
         if self.copied_box is None:
             return
         
-        base = self.copied_box[1].copy()
+        obj_id = self.copied_box[0]
+        obj = self.objects[obj_id]
+
+        base = self.copied_box[1].clone()
         center = self.box_to_state(box).mean(dim = 0)
         
         if box[0] > 1920:
@@ -569,7 +572,7 @@ class Annotator():
             shifts = []
             for i in x:
                 for j in y:
-                    shift_box = torch.tensor([i,j, base["l"],base["w"],base["h"],base["direction"]])
+                    shift_box = torch.tensor([i,j, obj["l"],obj["w"],obj["h"],torch.sign(base[1])])
                     shifts.append(shift_box)
         
             # convert shifted grid of boxes into 2D space
@@ -595,15 +598,11 @@ class Annotator():
             #print("With search_granularity {}, best error {} at {}".format(search_rad/grid_size,torch.sqrt(error[min_idx]),center))
         
         # save box
-        base["x"] = self.safe(center[0])
-        base["y"] = self.safe(center[1])
-        base["camera"] = self.clicked_camera
-        base["gen"] = "Manual"
-        base["timestamp"] = self.all_ts[self.frame_idx][self.clicked_camera]
-        key = "{}_{}".format(self.clicked_camera,base["id"])
-        self.data[self.frame_idx][key] = base
+        base[0] = self.safe(center[0])
+        base[1] = self.safe(center[1])
+        self.data[self.frame_idx][obj_id] = base
         
-    def automate(self,obj_idx):
+    def automate(self,obj_id):
         """
         Crop locally around expected box coordinates based on constant velocity
         assumption. Localize on this location. Use the resulting 2D bbox to align 3D template
@@ -611,17 +610,16 @@ class Annotator():
         """
         # store base box for future copy ops
         cam = self.clicked_camera
-        key = "{}_{}".format(cam,obj_idx)
-        prev_box = self.data[self.frame_idx].get(key)
+        prev_box = self.data[self.frame_idx].get(obj_id)
         
         if prev_box is None:
             return
-        
-        for c_idx in range(len(self.cameras)):
-            if self.cameras[c_idx].name == cam:
+        obj = self.objects[obj_id]
+        for c_idx in range(len(self.camera_names)):
+            if self.camera_names[c_idx] == cam:
                 break
         
-        crop_state = torch.tensor([prev_box["x"],prev_box["y"],prev_box["l"],prev_box["w"],prev_box["h"],prev_box["direction"]]).unsqueeze(0)
+        crop_state = torch.tensor([prev_box[0],prev_box[1],obj["l"],obj["w"],obj["h"],torch.sign(prev_box[0])]).unsqueeze(0)
         boxes_space = self.hg.state_to_im(crop_state,name = [cam])
         boxes_new =   torch.zeros([boxes_space.shape[0],4])
         boxes_new[:,0] = torch.min(boxes_space[:,:,0],dim = 1)[0]
@@ -635,7 +633,7 @@ class Annotator():
             return
         
         # copy current frame
-        frame = self.buffer[self.buffer_frame_idx][c_idx][0].copy()
+        frame = self.b.frames[self.frame_idx][c_idx].copy()
         
         # get 2D bbox from detector
         box_2D = self.crop_detect(frame,crop_box)
@@ -658,7 +656,7 @@ class Annotator():
         cv2.imshow("window", self.plot_frame)
         cv2.waitKey(100)
     
-    def crop_detect(self,frame,crop,ber = 1.2,cs = 112):
+    def crop_detect(self,frame,crop,ber = 1.5,cs = 112):
         """
         Detects a single object within the cropped portion of the frame
         """
@@ -2391,22 +2389,24 @@ class Annotator():
                
           
            elif self.active_command == "COPY PASTE" and self.copied_box:
-               nudge = 0.25
+               nudge = 0.5
+               xsign = torch.sign(self.copied_box[1][1])
                if key == ord("1"):
-                   self.shift(self.copied_box[0],None,dx = -nudge)
+                   self.shift(self.copied_box[0],None,dx = -nudge*xsign)
                    self.plot()
                if key == ord("5"):
                    self.shift(self.copied_box[0],None,dy =  nudge)
                    self.plot()
                if key == ord("3"):
-                   self.shift(self.copied_box[0],None,dx =  nudge)
+                   self.shift(self.copied_box[0],None,dx =  nudge*xsign)
                    self.plot()
                if key == ord("2"):
                    self.shift(self.copied_box[0],None,dy = -nudge)
                    self.plot()
             
            elif self.active_command == "DIMENSION" and self.copied_box:
-               nudge = 0.1
+               nudge = 1/6 
+
                if key == ord("1"):
                    self.dimension(self.copied_box[0],None,dx = -nudge*2)
                    self.plot()
