@@ -120,7 +120,7 @@ class Annotator():
         self.right_click = False
         self.copied_box = None
         
-        self.label_buffer = copy.deepcopy(self.data)
+        self.label_buffer = copy.deepcopy(self.data),copy.deepcopy(self.objects)
     
         self.colors =  np.random.rand(2000,3)
         
@@ -161,10 +161,6 @@ class Annotator():
        
         if self.toggle_auto:
             self.AUTO = True
-        
-
-     
-   
                
     def next(self,stride = 1):
         """
@@ -179,7 +175,8 @@ class Annotator():
 
         if self.frame_idx+stride < len(self.b.frames):
             self.frame_idx += stride
-            self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+            self.label_buffer = copy.deepcopy(self.data),copy.deepcopy(self.objects)
+
         else:
             print("On last frame")
     
@@ -194,7 +191,7 @@ class Annotator():
         
         if self.frame_idx-stride >= 0 and len(self.b.frames[self.frame_idx-stride]) > 0:
             self.frame_idx -= stride     
-            self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+            self.label_buffer = copy.deepcopy(self.data),copy.deepcopy(self.objects)
 
 
         else:
@@ -419,58 +416,58 @@ class Annotator():
         
         self.plot_frame = cat_im
         
-    def output_vid(self):
-        self.LANES = False
-        self.MASK = True
-        #self.active_cam = 6
-        directory = "video/scene2/{}".format(str(self.active_cam))
+    # def output_vid(self):
+    #     self.LANES = False
+    #     self.MASK = True
+    #     #self.active_cam = 6
+    #     directory = "video/scene2/{}".format(str(self.active_cam))
     
-        while self.frame_idx < self.last_frame:
+    #     while self.frame_idx < self.last_frame:
             
-            # while self.active_cam < len(self.camera_names):
-            if not os.path.exists(directory):
-                os.mkdir(directory)
+    #         # while self.active_cam < len(self.camera_names):
+    #         if not os.path.exists(directory):
+    #             os.mkdir(directory)
         
-            self.plot()
-            #resize_im = cv2.resize(self.plot_frame*255,(3840,2160))
-            cv2.imwrite("{}/{}.png".format(directory,str(self.frame_idx).zfill(4)),self.plot_frame*255)
+    #         self.plot()
+    #         #resize_im = cv2.resize(self.plot_frame*255,(3840,2160))
+    #         cv2.imwrite("{}/{}.png".format(directory,str(self.frame_idx).zfill(4)),self.plot_frame*255)
             
             
-            # warning, this de-syncs the cameras and is pretty dangerous for that reason
-            self.advance_2(camera_idx = self.active_cam)
-            self.frame_idx += 1
+    #         # warning, this de-syncs the cameras and is pretty dangerous for that reason
+    #         self.advance_2(camera_idx = self.active_cam)
+    #         self.frame_idx += 1
             
-            if self.frame_idx % 10 == 0:
-                print("On frame {}".format(self.frame_idx))
+    #         if self.frame_idx % 10 == 0:
+    #             print("On frame {}".format(self.frame_idx))
                 
                 
-        # convert frames to video
-        all_files = os.listdir(directory)
-        all_files.sort()
-        for filename in all_files:
-            filename = os.path.join(directory, filename)
-            img = cv2.imread(filename)
-            height, width, layers = img.shape
-            size = (width,height)
-            break
+    #     # convert frames to video
+    #     all_files = os.listdir(directory)
+    #     all_files.sort()
+    #     for filename in all_files:
+    #         filename = os.path.join(directory, filename)
+    #         img = cv2.imread(filename)
+    #         height, width, layers = img.shape
+    #         size = (width,height)
+    #         break
         
-        n = 0
-        f_name = os.path.join("/home/derek/Desktop",'{}_{}.mp4'.format(self.cameras[self.active_cam].name,self.cameras[self.active_cam+1].name))
-        temp_name =  os.path.join("/home/derek/Desktop",'temp.mp4')
+    #     n = 0
+    #     f_name = os.path.join("/home/derek/Desktop",'{}_{}.mp4'.format(self.cameras[self.active_cam].name,self.cameras[self.active_cam+1].name))
+    #     temp_name =  os.path.join("/home/derek/Desktop",'temp.mp4')
         
-        out = cv2.VideoWriter(temp_name,cv2.VideoWriter_fourcc(*'mp4v'), 8, size)
+    #     out = cv2.VideoWriter(temp_name,cv2.VideoWriter_fourcc(*'mp4v'), 8, size)
          
-        for filename in all_files:
-            filename = os.path.join(directory, filename)
-            img = cv2.imread(filename)
-            out.write(img)
-            print("Wrote frame {}".format(n))
-            n += 1
+    #     for filename in all_files:
+    #         filename = os.path.join(directory, filename)
+    #         img = cv2.imread(filename)
+    #         out.write(img)
+    #         print("Wrote frame {}".format(n))
+    #         n += 1
             
             
-        out.release()
+    #     out.release()
         
-        os.system("/usr/bin/ffmpeg -i {} -vcodec libx264 {}".format(temp_name,f_name))
+    #     os.system("/usr/bin/ffmpeg -i {} -vcodec libx264 {}".format(temp_name,f_name))
         
         
 
@@ -547,13 +544,7 @@ class Annotator():
                                 
     
     def change_class(self,obj_idx,cls):
-        for camera in self.cameras:
-             cam_name = camera.name
-             for frame in range(0,len(self.data)):
-                 key = "{}_{}".format(cam_name,obj_idx)
-                 item =  self.data[frame].get(key)
-                 if item is not None:
-                     item["class"] = cls
+        self.objects[obj_idx]["class"] = cls
     
     def paste_in_2D_bbox(self,box):
         """
@@ -722,10 +713,10 @@ class Annotator():
             2. otherwise, object is adjusted in the principle direction of displacement vector
         """
         
-        key = "{}_{}".format(self.clicked_camera,obj_idx)
-        item =  self.data[self.frame_idx].get(key)
-        if item is not None:
-            item["gen"] = "Manual"
+        key = obj_idx
+        item =  self.objects[key]
+        if item is None:
+            return
         
         if dx == 0 and dy == 0:
             state_box = self.box_to_state(box)
@@ -735,12 +726,11 @@ class Annotator():
         else:
             dh = dy
         
-        key = "{}_{}".format(self.clicked_camera,obj_idx)
         
         try:
-            l = self.data[self.frame_idx][key]["l"]
-            w = self.data[self.frame_idx][key]["w"]
-            h = self.data[self.frame_idx][key]["h"]
+            l = self.objects[key]["l"]
+            w = self.objects[key]["w"]
+            h = self.objects[key]["h"]
         except:
             return
         
@@ -754,17 +744,12 @@ class Annotator():
             relevant_change = dy + w
             relevant_key = "w"
         
-        for camera in self.cameras:
-            cam = camera.name
-            for frame in range(0,len(self.data)):
-                 key = "{}_{}".format(cam,obj_idx)
-                 item =  self.data[frame].get(key)
-                 if item is not None:
-                     item[relevant_key] = relevant_change
+        item[relevant_key] = relevant_change
    
         # also adjust the copied box if necessary
         if self.copied_box is not None and self.copied_box[0] == obj_idx:
-             self.copied_box[1][relevant_key] = relevant_change
+             self.objects[obj_idx][relevant_key] = relevant_change
+             
     
     def copy_paste(self,point):     
         if self.copied_box is None:
@@ -775,13 +760,12 @@ class Annotator():
             
             state_point = self.box_to_state(point)[0]
             
-            key = "{}_{}".format(self.clicked_camera,obj_idx)
-            obj =  self.data[self.frame_idx].get(key)
+            obj =  self.data[self.frame_idx].get(obj_idx)
             
             if obj is None:
                 return
             
-            base_box = obj.copy()
+            base_box = obj.clone()
             
             # save the copied box
             self.copied_box = (obj_idx,base_box,[state_point[0],state_point[1]].copy())
@@ -797,21 +781,14 @@ class Annotator():
 
             dx = state_point[0] - self.copied_box[2][0] 
             dy = state_point[1] - self.copied_box[2][1] 
-            new_obj["x"] += dx
-            new_obj["y"] += dy
-            new_obj["x"]  = new_obj["x"].item()
-            new_obj["y"]  = new_obj["y"].item()
-            new_obj["timestamp"] = self.all_ts[self.frame_idx][self.clicked_camera]
-            new_obj["camera"] = self.clicked_camera
-            new_obj["gen"] = "Manual"
-            
-            # remove existing box if there is one
-            key = "{}_{}".format(self.clicked_camera,obj_idx)
-            # obj =  self.data[self.frame_idx].get(key)
-            # if obj is not None:
-            #     del self.data[self.frame_idx][key]
+            new_obj[0] += dx
+            new_obj[1] += dy
+            new_obj[0]  = new_obj[0].item()
+            new_obj[1]  = new_obj[1].item()
+            new_obj[2] = 0 #TODO FIX with real timeself.all_ts[self.frame_idx][self.clicked_camera]
+
                 
-            self.data[self.frame_idx][key] = new_obj
+            self.data[self.frame_idx][obj_idx] = new_obj
             
             if self.AUTO:
                 self.automate(obj_idx)
@@ -819,67 +796,67 @@ class Annotator():
             
 
             
-    def interpolate(self,obj_idx,verbose = True):
+    # def interpolate(self,obj_idx,verbose = True):
         
-        #self.print_all(obj_idx)
+    #     #self.print_all(obj_idx)
         
-        for cur_cam in self.cameras:
-            cam_name = cur_cam.name
+    #     for cur_cam in self.cameras:
+    #         cam_name = cur_cam.name
         
-            prev_idx = -1
-            prev_box = None
-            for f_idx in range(0,len(self.data)):
-                frame_data = self.data[f_idx]
+    #         prev_idx = -1
+    #         prev_box = None
+    #         for f_idx in range(0,len(self.data)):
+    #             frame_data = self.data[f_idx]
                     
-                # get  obj_idx box for this frame if there is one
-                cur_box = None
-                for obj in frame_data.values():
-                    if obj["id"] == obj_idx and obj["camera"] == cam_name:
-                        del cur_box
-                        cur_box = copy.deepcopy(obj)
-                        break
+    #             # get  obj_idx box for this frame if there is one
+    #             cur_box = None
+    #             for obj in frame_data.values():
+    #                 if obj["id"] == obj_idx and obj["camera"] == cam_name:
+    #                     del cur_box
+    #                     cur_box = copy.deepcopy(obj)
+    #                     break
                     
-                if prev_box is not None and cur_box is not None:
+    #             if prev_box is not None and cur_box is not None:
                     
                     
-                    for inter_idx in range(prev_idx+1, f_idx):   
+    #                 for inter_idx in range(prev_idx+1, f_idx):   
                         
-                        # doesn't assume all frames are evenly spaced in time
-                        t1 = self.all_ts[prev_idx][cam_name]
-                        t2 = self.all_ts[f_idx][cam_name]
-                        ti = self.all_ts[inter_idx][cam_name]
-                        p1 = float(t2 - ti) / float(t2 - t1)
-                        p2 = 1.0 - p1                    
+    #                     # doesn't assume all frames are evenly spaced in time
+    #                     t1 = self.all_ts[prev_idx][cam_name]
+    #                     t2 = self.all_ts[f_idx][cam_name]
+    #                     ti = self.all_ts[inter_idx][cam_name]
+    #                     p1 = float(t2 - ti) / float(t2 - t1)
+    #                     p2 = 1.0 - p1                    
                         
                         
-                        new_obj = {
-                            "x": p1 * prev_box["x"] + p2 * cur_box["x"],
-                            "y": p1 * prev_box["y"] + p2 * cur_box["y"],
-                            "l": prev_box["l"],
-                            "w": prev_box["w"],
-                            "h": prev_box["h"],
-                            "direction": prev_box["direction"],
-                            "id": obj_idx,
-                            "class": prev_box["class"],
-                            "timestamp": self.all_ts[inter_idx][cam_name],
-                            "camera":cam_name,
-                            "gen":"Interpolation"
-                            }
+    #                     new_obj = {
+    #                         "x": p1 * prev_box["x"] + p2 * cur_box["x"],
+    #                         "y": p1 * prev_box["y"] + p2 * cur_box["y"],
+    #                         "l": prev_box["l"],
+    #                         "w": prev_box["w"],
+    #                         "h": prev_box["h"],
+    #                         "direction": prev_box["direction"],
+    #                         "id": obj_idx,
+    #                         "class": prev_box["class"],
+    #                         "timestamp": self.all_ts[inter_idx][cam_name],
+    #                         "camera":cam_name,
+    #                         "gen":"Interpolation"
+    #                         }
                         
-                        key = "{}_{}".format(cam_name,obj_idx)
-                        self.data[inter_idx][key] = new_obj
+    #                     key = "{}_{}".format(cam_name,obj_idx)
+    #                     self.data[inter_idx][key] = new_obj
                 
-                # lastly, update prev_frame
-                if cur_box is not None:
-                    prev_idx = f_idx 
-                    del prev_box
-                    prev_box = copy.deepcopy(cur_box)
+    #             # lastly, update prev_frame
+    #             if cur_box is not None:
+    #                 prev_idx = f_idx 
+    #                 del prev_box
+    #                 prev_box = copy.deepcopy(cur_box)
         
-        if verbose: print("Interpolated boxes for object {}".format(obj_idx))
+    #     if verbose: print("Interpolated boxes for object {}".format(obj_idx))
         
     def correct_homography_Z(self,box):
         dx = self.safe(box[2]-box[0]) 
-        if dx > 500:
+        if np.abs(dx) > 100:
             sign = -1
         else:
             sign = 1
@@ -896,7 +873,7 @@ class Annotator():
         if direction == 1: self.hg.correspondence[self.clicked_camera + "_EB"]["P"][:,2] *= sign*delta
         else:              self.hg.correspondence[self.clicked_camera + "_WB"]["P"][:,2] *= sign*delta
             
-        self.hg.save(self.hg_save_file)
+        #self.hg.save(self.hg_save_file)
         
     def correct_time_bias(self,box):
         
@@ -928,14 +905,15 @@ class Annotator():
         
         while frame_idx < stop_idx:
             try:
-                key = "{}_{}".format(self.clicked_camera,obj_idx)
-                obj =  self.data[frame_idx].get(key)
+                obj =  self.data[frame_idx].get(obj_idx)
                 if obj is not None:
-                    del self.data[frame_idx][key]
+                    del self.data[frame_idx][obj_idx]
             except KeyError:
                 pass
             frame_idx += 1
         
+        if obj_idx in self.objects.keys():
+            del self.objects[obj_idx]
         
     def on_mouse(self,event, x, y, flags, params):
        if event == cv.EVENT_LBUTTONDOWN and not self.clicked:
@@ -1009,7 +987,8 @@ class Annotator():
     
     def undo(self):
         if self.label_buffer is not None:
-            self.data[self.frame_idx] = self.label_buffer
+            self.data = self.label_buffer[0]
+            self.objects = self.label_buffer[1]
             self.label_buffer = None
             self.plot()
         else:
@@ -2251,16 +2230,12 @@ class Annotator():
            
            if self.new is not None:
                 # buffer one change
-                self.label_buffer = copy.deepcopy(self.data[self.frame_idx])
+                self.label_buffer = copy.deepcopy(self.data),copy.deepcopy(self.objects)
                 
                 # Add and delete objects
                 if self.active_command == "DELETE":
-                    obj_idx = self.find_box(self.new)
-                    try:
-                        n_frames = int(self.keyboard_input())
-                    except:
-                        n_frames = -1    
-                    self.delete(obj_idx,n_frames = n_frames)
+                    obj_idx = self.find_box(self.new) 
+                    self.delete(obj_idx)
                     
                 elif self.active_command == "ADD":
                     # get obj_idx
@@ -2319,7 +2294,7 @@ class Annotator():
 
                 self.new = None   
                 
-
+                
            
            ### Show frame
                 
