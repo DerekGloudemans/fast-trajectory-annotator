@@ -10,7 +10,7 @@
 - [X] Design data structure for holding object positions (frame indexed)
 - [X] Design data structure for holding object completeness (red if there is no sink camera, green otherwise)
 - [X] Implement auto-box detection (verify that it still works)
-- [ ] Add save() and quit() and make sure reload works
+- [X] Add save() and quit() and make sure reload works
 - [ ] Add timestamp file parser and display time in `plot()`
 - [ ] Add a timer to keep track of how long a single object takes
 - [ ] Add GPS box data
