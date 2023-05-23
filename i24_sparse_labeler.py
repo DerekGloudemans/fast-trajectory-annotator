@@ -144,6 +144,8 @@ class Annotator():
             pickle.dump([self.data,self.objects],f)
         print("Saved annotations at {}".format(self.save_file))
         
+        self.recount_objects()
+        
     def buffer(self,n):
         self.b.fill(n)
         while len(self.b.frames[self.frame_idx]) == 0:
@@ -492,7 +494,7 @@ class Annotator():
             "class":"midsize",
             "source":self.clicked_camera,
             "sink": None,
-            "n_annotations":1
+            "complete":0
             }
         
         timestamp  = 0 # TODO
@@ -881,6 +883,70 @@ class Annotator():
             
         #self.hg.save(self.hg_save_file)
         
+    def sink_active_object(self):
+        if self.copied_box is None:
+            return
+        
+        obj_id = self.copied_box[0]
+        self.objects[obj_id]["sink"] = self.clicked_camera
+        self.copied_box = None
+        
+        # count number of annotations for this object to ensure there are an appropriate number
+        
+        count = 0
+        for fidx in range(len(self.data)):
+            if obj_id in self.data[fidx].keys():
+                count += 1
+                
+        # get number of cameras between source and sink
+        
+        source_idx = -1
+        sink_idx = -1
+        source = self.objects[obj_id]["source"]
+        sink = self.objects[obj_id]["sink"]
+        for i in range(len(self.camera_names)):
+            if self.camera_names[i] == source:
+                source_idx = i
+            elif self.camera_names[i] == sink:
+                sink_idx = i
+                
+        probable_count = np.abs(sink_idx - source_idx) + 1
+        self.objects[obj_id]["complete"] = 1
+        
+        if probable_count != count:
+            print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
+            self.objects[obj_id]["complete"] = 0.5
+     
+    def recount_objects(self):
+        for obj_id in range(self.next_object_id):
+
+            source_idx = -1
+            sink_idx = -1
+            source = self.objects[obj_id]["source"]
+            sink = self.objects[obj_id]["sink"]
+            if sink is None:
+                continue
+        
+            count = 0
+            for fidx in range(len(self.data)):
+                if obj_id in self.data[fidx].keys():
+                    count += 1
+                    
+            # get number of cameras between source and sink
+            for i in range(len(self.camera_names)):
+                if self.camera_names[i] == source:
+                    source_idx = i
+                elif self.camera_names[i] == sink:
+                    sink_idx = i
+                    
+            probable_count = np.abs(sink_idx - source_idx) + 1
+            self.objects[obj_id]["complete"] = 1
+            
+            if probable_count != count:
+                print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
+                self.objects[obj_id]["complete"] = 0.5
+                
+            
     def delete(self,obj_idx, n_frames = -1):
         """
         Delete object obj_idx in this and n_frames -1 subsequent frames. If n_frames 
@@ -2216,10 +2282,10 @@ class Annotator():
                 elif self.active_command == "COPY PASTE":
                     self.copy_paste(self.new)
                     
-                # interpolate between copy-pasted frames
-                elif self.active_command == "INTERPOLATE":
-                    obj_idx = self.find_box(self.new)
-                    self.interpolate(obj_idx)  
+                # # interpolate between copy-pasted frames
+                # elif self.active_command == "INTERPOLATE":
+                #     obj_idx = self.find_box(self.new)
+                #     self.interpolate(obj_idx)  
 
                 # correct vehicle class
                 elif self.active_command == "VEHICLE CLASS":
@@ -2229,10 +2295,6 @@ class Annotator():
                     except:
                         cls = "midsize"
                     self.change_class(obj_idx,cls)
-
-                # adjust time bias
-                elif self.active_command == "TIME BIAS":
-                    self.correct_time_bias(self.new)
                     
                 # adjust homography
                 elif self.active_command == "HOMOGRAPHY":
@@ -2241,14 +2303,8 @@ class Annotator():
                 elif self.active_command == "2D PASTE":
                     self.paste_in_2D_bbox(self.new)
                     
-                elif self.active_command == "CURVE":
-                    self.fit_curvature(self.new)
-                    
-                elif self.active_command == "ERASE CURVE":
-                    self.erase_curvature(self.new)
                     
                 self.plot()
-
                 self.new = None   
                 
                 
@@ -2312,13 +2368,15 @@ class Annotator():
                self.plot()
                
            elif key == ord("p"):
-               
                try:
                    n = int(self.keyboard_input())
                except:
                    n = self.plot_idx
                self.plot_trajectory(obj_idx = n)
                self.plot_idx = n + 1
+
+           elif key == ord("."):
+                self.sink_active_object()
                
            # toggle commands
            elif key == ord("a"):

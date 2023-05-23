@@ -9,6 +9,7 @@ import time
 import re
 import numpy as np
 import torch
+import csv
 
 from torchvision.transforms import functional as F
 
@@ -132,7 +133,7 @@ class GPUBackendFrameGetter:
         
         
         frame = self.queue.get(timeout = 10)
-        ts = frame[1] / 10e8
+        ts = frame[1] #/ 10e8
         im = frame[0]
         
         return im,ts
@@ -149,6 +150,15 @@ def load_queue_continuous_vpf(q,directory,device,buffer_size,resize,start_time):
     gpuID = device
     device = torch.cuda.device("cuda:{}".format(gpuID))
     file = directory
+    
+    
+    ts_file = file.split(".")[0] + ".pts"
+    
+    ts = []
+    with open(ts_file, newline='') as csvfile:
+        reader = csv.reader(csvfile, delimiter=',', quotechar='|')
+        for row in reader:
+            ts.append(float(row[0]))
     
     # # GET FIRST FILE
     # # sort directory files (by timestamp)
@@ -242,8 +252,9 @@ def load_queue_continuous_vpf(q,directory,device,buffer_size,resize,start_time):
             # apply normalization
             #surface_tensor = F.normalize(surface_tensor,mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             
-            frame = (surface_tensor,0)#pkt.pts)
+            frame = (surface_tensor,ts[0])#pkt.pts)
             q.put(frame)
+            del ts[0]
             
         # ### Get next file if there is one 
         # # sort directory files (by timestamp)
