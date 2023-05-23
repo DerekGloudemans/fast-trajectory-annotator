@@ -80,7 +80,7 @@ class Annotator():
         
         #### get homography
         self.hg = I24_RCS(save_file = hg_path,downsample = 2)
-        
+        self.hg_path = hg_path
     
         #### Initialize data structures for storing annotations, and optionally reload
         
@@ -88,26 +88,22 @@ class Annotator():
         self.objects = {} 
        
         
+           
+        try:
+            with open(save_file,"rb") as f:
+                [self.data,self.objects] = pickle.load(f)
+        except:
+            pass
+        self.save_file = save_file
+        
+       
         self.next_object_id = 0
         for id in self.objects.keys():
             if id > self.next_object_id:
                 self.next_object_id = id + 1
-                
-        
-        
-        #### Initialize list for storing [ID,time to label] sequentially for each object
-        self.time_queue = []
 
                 
         #### Initialize a bunch of other stuff for tool management
-       
-        # get first frames from each camera according to first frame of data
-        # self.buffer_frame_idx = -1
-        # self.buffer_lim = 1200
-        # self.last_frame = 2700
-        # self.buffer = []
-        
-
         self.cont = True
         self.new = None
         self.clicked = False
@@ -134,7 +130,19 @@ class Annotator():
         
         self.plot_idx = 0        
         self.active_cam = 0
+    
+
+    def quit(self):      
+        self.cont = False
+        cv2.destroyAllWindows()
+            
+        self.save()
         
+        
+    def save(self):
+        with open(self.save_file,"wb") as f:
+            pickle.dump([self.data,self.objects],f)
+        print("Saved annotations at {}".format(self.save_file))
         
     def buffer(self,n):
         self.b.fill(n)
@@ -873,23 +881,6 @@ class Annotator():
             
         #self.hg.save(self.hg_save_file)
         
-    def correct_time_bias(self,box):
-        
-        # get relevant camera idx
-        
-        if box[0] > 1920:
-            camera_idx = self.active_cam + 1
-        else:
-            camera_idx = self.active_cam
-            
-        # get dy in image space
-        dy = box[3] - box[1]
-        
-        # 10 pixels = 0.001
-        self.ts_bias[camera_idx] += dy* 0.0001
-        
-        self.plot_all_trajectories()
-    
     def delete(self,obj_idx, n_frames = -1):
         """
         Delete object obj_idx in this and n_frames -1 subsequent frames. If n_frames 
@@ -975,13 +966,7 @@ class Annotator():
                 break
         return keys    
       
-    def quit(self):      
-        self.cont = False
-        cv2.destroyAllWindows()
-        for cam in self.cameras:
-            cam.release()
-            
-        self.save2()
+
     
     def undo(self):
         if self.label_buffer is not None:
@@ -2184,33 +2169,6 @@ class Annotator():
                 print("No matching points for cameras {} and {}".format(cam,prev_cam))
         if len(all_diffs) > 0:
             print("Average y-error over all cameras: {}".format(sum(all_diffs)/len(all_diffs)))
-        
-        
-    
-    def save2(self):
-        with open("chg_labels_sequence_{}.cpkl".format(self.scene_id),"wb") as f:
-            data = [self.data,self.all_ts,self.ts_bias,self.hg]
-            pickle.dump(data,f)
-            print("Saved labels")
-            self.count()
-            
-    def reload_chg_data(self):
-        with open("chg_labels_sequence_{}.cpkl".format(self.scene_id),"rb") as f:
-            self.data,self.all_ts,self.ts_bias,self.hg = pickle.load(f)
-            print("Reloaded data")
-        
-    def reload(self):
-        try:
-            with open("labeler_cache_sequence_{}.cpkl".format(self.scene_id),"rb") as f:
-                self.data,self.all_ts,self.ts_bias,self.hg,self.poly_params = pickle.load(f)
-                self.curve_points = dict([(camera.name+"_EB",[]) for camera in self.cameras]+[(camera.name+"_WB",[]) for camera in self.cameras])
-            
-        except:
-            with open("labeler_cache_sequence_{}.cpkl".format(self.scene_id),"rb") as f:
-                self.data,self.all_ts,self.ts_bias,self.hg = pickle.load(f)
-                self.poly_params = dict([(camera.name+"_EB",[0,0,0]) for camera in self.cameras]+[(camera.name+"_WB",[0,0,0]) for camera in self.cameras])
-                self.curve_points = dict([(camera.name+"_EB",[]) for camera in self.cameras]+[(camera.name+"_WB",[]) for camera in self.cameras])
-    
     
 
     def run(self):
@@ -2221,6 +2179,7 @@ class Annotator():
         cv2.namedWindow("window")
         cv.setMouseCallback("window", self.on_mouse, 0)
         self.plot()
+        self.cont = True
         
         while(self.cont): # one frame
             
@@ -2315,8 +2274,8 @@ class Annotator():
            elif key == ord("q"):
                self.quit()
            elif key == ord("w"):
-               self.save2()
-               self.plot_all_trajectories()
+               self.save()
+               #self.plot_all_trajectories()
            elif key == ord("@"):
                self.toggle_auto = not(self.toggle_auto)
                print("Automatic box pasting: {}".format(self.toggle_auto))
@@ -2337,7 +2296,7 @@ class Annotator():
            elif key == ord("+"):
                print("Filling buffer. Type number of frames to buffer...")
                n = int(self.keyboard_input())  
-               self.fill_buffer(n)
+               self.buffer(n)
                
            elif key == ord("?"):
                self.estimate_ts_bias()
@@ -2457,7 +2416,7 @@ class Annotator():
 if __name__ == "__main__":
     directory = "/home/derek/Data/1hz"
     hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230503.cpkl"
-    
-    ann = Annotator(directory,hg_file)  
+    save_file = "temp_test.cpkl"
+    ann = Annotator(directory,hg_file,save_file=save_file)  
     ann.run()
     

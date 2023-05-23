@@ -50,9 +50,10 @@ class NVC_Buffer():
         self.buffer_limit = buffer_lim
         
     def fill(self,n_frames):
+        init_n_frames = len(self.frames)
         for i in range(n_frames):
             if i % 10 == 0:
-                print("Buffering frame {} of {}".format(i,n_frames))
+                print("Buffering frame {} of {}".format(len(self.frames),n_frames+init_n_frames))
                 
             frames,ts = self.get_frames()
             
