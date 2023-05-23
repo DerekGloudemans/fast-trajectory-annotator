@@ -19,7 +19,7 @@ class NVC_Buffer():
     directory - overall file buffer
     """
     
-    def __init__(self,directory,include_cams,ctx,resize = (1920,1080)):
+    def __init__(self,directory,include_cams,ctx,resize = (1920,1080),buffer_lim = 1000):
      
         
                
@@ -47,7 +47,7 @@ class NVC_Buffer():
         self.frames = []
         self.ts = []
         
-        self.buffer_limit = 50
+        self.buffer_limit = buffer_lim
         
     def fill(self,n_frames):
         for i in range(n_frames):

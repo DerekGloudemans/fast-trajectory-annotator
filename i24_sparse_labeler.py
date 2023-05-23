@@ -64,18 +64,18 @@ class Annotator():
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
-        self.b = NVC_Buffer(im_directory,include_cameras,ctx)
+        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 1800)
         
         
         # frame indexed data array since we'll plot by frames
-        self.data = [[] for i in range(10000)] # each frame 
+        self.data = [{} for i in range(10000)] # each frame 
         
         
         self.frame_idx = 0
         self.toggle_auto = True
         self.AUTO = True
 
-        self.buffer(100)
+        self.buffer(10)
         
         
         #### get homography
@@ -90,19 +90,10 @@ class Annotator():
         
         self.next_object_id = 0
         for id in self.objects.keys():
-            if id > self.next_obj_id:
-                self.next_obj_id = id + 1
+            if id > self.next_object_id:
+                self.next_object_id = id + 1
                 
         
-        
-        
-        
-        #### Initialize queue for storing last annotated crops
-        self.crops = []
-        
-        #### Initialize queue for holding predicted travel times for each camera pair and each lane
-        # we use a simple 12-foot lane width assumption for this 
-        self.travel_times = np.zeros([len(self.camera_names),15])  
         
         #### Initialize list for storing [ID,time to label] sequentially for each object
         self.time_queue = []
@@ -171,46 +162,7 @@ class Annotator():
         if self.toggle_auto:
             self.AUTO = True
         
-    
-    def next(self):
-   
-      
-    # def advance_all(self):
-    #     for c_idx,camera in enumerate(self.cameras):
-    #             next(camera)
-        
-    #     frames = [[cam.frame,cam.ts] for cam in self.cameras]
-        
-    #     timestamps = {}
-    #     for camera in self.cameras:
-    #         timestamps[camera.name] = camera.ts
-            
-    #     if len(self.all_ts) <= self.frame_idx:
-    #         self.all_ts.append(timestamps)
-        
-    #     self.buffer.append(frames)
-    #     if len(self.buffer) > self.buffer_lim:
-    #         #self.buffer = self.buffer[1:]
-    #         del self.buffer[0]
-            
-    # def advance_2(self,camera_idx = 0):
-    #     for c_idx in [camera_idx,camera_idx+1]:
-    #             camera = self.cameras[c_idx]
-    #             next(camera)
-        
-    #     frames = [[cam.frame,cam.ts] for cam in self.cameras]
-        
-    #     timestamps = {}
-    #     for camera in self.cameras:
-    #         timestamps[camera.name] = camera.ts
-            
-    #     if len(self.all_ts) <= self.frame_idx:
-    #         self.all_ts.append(timestamps)
-        
-    #     self.buffer.append(frames)
-    #     if len(self.buffer) > self.buffer_lim:
-    #         #self.buffer = self.buffer[1:]
-    #         del self.buffer[0]
+
      
    
                
@@ -257,10 +209,33 @@ class Annotator():
            frame = self.b.frames[self.frame_idx][i]
            frame = frame.copy()
            
+           
            # # get frame objects
            # # stack objects as tensor and aggregate other data for label
-           # ts_data = list(self.data[self.frame_idx].values())
-           # ts_data = list(filter(lambda x: x["camera"] == camera.name,ts_data))
+           positions = list(self.data[self.frame_idx].values())
+           ids = list(self.data[self.frame_idx].keys())
+           
+           # stack object x,y,l,w,h,direction into state tensor
+           boxes = []
+           for p in range(len(positions)):
+               pos = positions[p]
+               id = ids[p]
+               obj = self.objects[id]
+               datum = torch.tensor([pos[0],pos[1],obj["l"],obj["w"],obj["h"],torch.sign(pos[1])])
+               boxes.append(datum)
+           
+           #convert to image
+           #im_boxes = self.hg.state_to_im(boxes,name = [self.camera_names[self.active_cam]])
+           
+           
+           # remove all boxes entirely out of image ?
+           # TODO maybe if necessary 
+
+           
+           # plot boxes with ids
+           if len(ids) > 0:
+               boxes = torch.stack(boxes)
+               self.hg.plot_state_boxes(frame,boxes,labels = ids,thickness = 1,name = [self.camera_names[i] for _ in boxes])
            
            
            # #chg_data = list(self.port_data[self.frame_idx].values())
@@ -277,11 +252,11 @@ class Annotator():
            #     # convert into image space
            #     cname = [camera.name for b in boxes]
 
-           #     im_boxes = self.chg.state_to_im(boxes,name = cname)
+           #     im_boxes = self.hg.state_to_im(boxes,name = cname)
                 
            #     # plot on frame
            #     frame = self.hg.plot_state_boxes(frame,boxes,name = camera.name,color = (0,255,0),secondary_color = (0,255,0),thickness = 2,jitter_px = 0)
-           #     frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,100,255),thickness = 2)
+           #     frame = self.hg.plot_state_boxes(frame,boxes,name = cname,color = (0,100,255),thickness = 2)
            
                
            #     # plot labels
@@ -299,10 +274,10 @@ class Annotator():
                
            #     # convert into image space
            #     cname = [camera.name for b in boxes]
-           #     chgim_boxes = self.chg.state_to_im(boxes,name = cname)
+           #     chgim_boxes = self.hg.state_to_im(boxes,name = cname)
                 
            #     # plot on frame
-           #     frame = self.chg.plot_state_boxes(frame,boxes,name = cname,color = (0,0,255),thickness = 1)
+           #     frame = self.hg.plot_state_boxes(frame,boxes,name = cname,color = (0,0,255),thickness = 1)
            
             
            
@@ -366,7 +341,7 @@ class Annotator():
            #              curve = np.stack([x_curve,y_curve,zeros,zeros,zeros,zeros],axis = 1)
            #              curve = torch.from_numpy(curve)
            #              cname = [camera.name for i in range(x_curve.shape[0])]
-           #              curve_im = self.chg.state_to_im(curve,name = cname)
+           #              curve_im = self.hg.state_to_im(curve,name = cname)
            #              #curve_im = curve_im[:,0,:]
                        
            #              mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
@@ -382,7 +357,7 @@ class Annotator():
            #                      curve = np.stack([x_curve,y_curve,z_curve,z_curve,z_curve,z_curve],axis = 1)
            #                      curve = torch.from_numpy(curve)
            #                      cname = [camera.name for i in range(x_curve.shape[0])]
-           #                      curve_im = self.chg.state_to_im(curve,name = cname)
+           #                      curve_im = self.hg.state_to_im(curve,name = cname)
                                
            #                      mask = ((curve_im[:,:,0] > 0).int() + (curve_im[:,:,0] < 1920).int() + (curve_im[:,:,1] > 0).int() + (curve_im[:,:,1] < 1080).int()) == 4
            #                      curve_im = curve_im[mask,:]
@@ -452,7 +427,7 @@ class Annotator():
     
         while self.frame_idx < self.last_frame:
             
-            # while self.active_cam < len(self.seq_keys):
+            # while self.active_cam < len(self.camera_names):
             if not os.path.exists(directory):
                 os.mkdir(directory)
         
@@ -503,34 +478,24 @@ class Annotator():
         
         xy = self.box_to_state(location)[0,:].data.numpy()
         
-        
-        
         # create new object
+        # 2022 nissan rogue dimensions : 183″ L x 72″ W x 67″ H
         obj = {
-            "x": float(xy[0]),
-            "y": float(xy[1]),
-            "l": self.chg.class_dims["midsize"][0],
-            "w": self.chg.class_dims["midsize"][1],
-            "h": self.chg.class_dims["midsize"][2],
-            "direction": 1 if xy[1] < 60 else -1,
+            "l": 183/12,
+            "w": 72/12,
+            "h": 67/12,
             "class":"midsize",
-            "timestamp": self.all_ts[self.frame_idx][self.clicked_camera],
-            "id": obj_idx,
-            "camera":self.clicked_camera,
-            "gen":"Manual"
+            "source":self.clicked_camera,
+            "sink": None,
+            "n_annotations":1
             }
         
-        # try:
-        #     key = "{}_{}".format(self.clicked_camera,obj_idx-1)
-        #     obj["l"] = self.data[self.frame_idx][key]["l"]
-        #     obj["w"] = self.data[self.frame_idx][key]["w"]
-        #     obj["h"] = self.data[self.frame_idx][key]["h"]
-        # except:
-        #     pass
+        timestamp  = 0 # TODO
+        datum = torch.tensor([float(xy[0]),float(xy[1]),timestamp],dtype = torch.double)
         
-        key = "{}_{}".format(self.clicked_camera,obj_idx)
-        self.data[self.frame_idx][key] = obj
-        #self.save2()
+        self.objects[obj_idx] = obj
+        self.data[self.frame_idx][obj_idx] = datum
+
 
     
     def box_to_state(self,point,direction = False):
@@ -543,27 +508,27 @@ class Annotator():
         point = point.copy()
         #transform point into state space
         if point[0] > 1920:
-            cam = self.seq_keys[self.active_cam+1]
+            cam = self.camera_names[self.active_cam+1]
             point[0] -= 1920
             point[2] -= 1920
         else:
-            cam = self.seq_keys[self.active_cam]
+            cam = self.camera_names[self.active_cam]
 
         point1 = torch.tensor([point[0],point[1]]).unsqueeze(0).unsqueeze(0).repeat(1,8,1)
         point2 = torch.tensor([point[2],point[3]]).unsqueeze(0).unsqueeze(0).repeat(1,8,1)
         point = torch.cat((point1,point2),dim = 0)
         
-        state_point = self.chg.im_to_state(point,name = [cam,cam], heights = torch.tensor([0]))
+        state_point = self.hg.im_to_state(point,name = [cam,cam], heights = torch.tensor([0]))
         
         return state_point[:,:2]
     
         
     def shift(self,obj_idx,box, dx = 0, dy = 0):
         
-        key = "{}_{}".format(self.clicked_camera,obj_idx)
-        item =  self.data[self.frame_idx].get(key)
-        if item is not None:
-            item["gen"] = "Manual"
+        item =  self.data[self.frame_idx].get(obj_idx)
+        
+        if item is None:
+            return
         
         
         
@@ -574,21 +539,11 @@ class Annotator():
         
         
         if np.abs(dy) > np.abs(dx): # shift y if greater magnitude of change
-            # shift y for obj_idx in this and all subsequent frames
-            for frame in range(self.frame_idx,len(self.data)):
-                key = "{}_{}".format(self.clicked_camera,obj_idx)
-                item =  self.data[frame].get(key)
-                if item is not None:
-                    item["y"] += dy
-                break
+            item[1] += dy
+                
         else:
-            # shift x for obj_idx in this and all subsequent frames
-           for frame in range(self.frame_idx,len(self.data)):
-                key = "{}_{}".format(self.clicked_camera,obj_idx)
-                item =  self.data[frame].get(key)
-                if item is not None:
-                    item["x"] += dx
-                break
+            item[0] += dx
+             
                                 
     
     def change_class(self,obj_idx,cls):
@@ -629,7 +584,7 @@ class Annotator():
             # convert shifted grid of boxes into 2D space
             shifts = torch.stack(shifts)
             cname = [self.clicked_camera for _ in range(shifts.shape[0])]
-            boxes_space = self.chg.state_to_im(shifts,name = cname)
+            boxes_space = self.hg.state_to_im(shifts,name = cname)
             
             # find 2D bbox extents of each
             boxes_new =   torch.zeros([boxes_space.shape[0],4])
@@ -676,7 +631,7 @@ class Annotator():
                 break
         
         crop_state = torch.tensor([prev_box["x"],prev_box["y"],prev_box["l"],prev_box["w"],prev_box["h"],prev_box["direction"]]).unsqueeze(0)
-        boxes_space = self.chg.state_to_im(crop_state,name = [cam])
+        boxes_space = self.hg.state_to_im(crop_state,name = [cam])
         boxes_new =   torch.zeros([boxes_space.shape[0],4])
         boxes_new[:,0] = torch.min(boxes_space[:,:,0],dim = 1)[0]
         boxes_new[:,2] = torch.max(boxes_space[:,:,0],dim = 1)[0]
@@ -938,10 +893,10 @@ class Annotator():
         #     self.hg.hg1.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
         # else:   
         #     self.hg.hg2.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
-        if direction == 1: self.chg.correspondence[self.clicked_camera + "_EB"]["P"][:,2] *= sign*delta
-        else:              self.chg.correspondence[self.clicked_camera + "_WB"]["P"][:,2] *= sign*delta
+        if direction == 1: self.hg.correspondence[self.clicked_camera + "_EB"]["P"][:,2] *= sign*delta
+        else:              self.hg.correspondence[self.clicked_camera + "_WB"]["P"][:,2] *= sign*delta
             
-        self.chg.save(self.chg_save_file)
+        self.hg.save(self.hg_save_file)
         
     def correct_time_bias(self,box):
         
@@ -981,21 +936,6 @@ class Annotator():
                 pass
             frame_idx += 1
         
-   
-    def get_unused_id(self):
-        all_ids = []
-        for frame_data in self.data:
-            for item in frame_data.values():
-                all_ids.append(item["id"])
-                
-        all_ids = list(set(all_ids))
-        
-        new_id = 0
-        while True:
-            if new_id in all_ids:
-                new_id += 1
-            else:
-                return new_id
         
     def on_mouse(self,event, x, y, flags, params):
        if event == cv.EVENT_LBUTTONDOWN and not self.clicked:
@@ -1008,10 +948,10 @@ class Annotator():
             
             
             if x > 1920:
-                self.clicked_camera = self.seq_keys[self.active_cam+1]
+                self.clicked_camera = self.camera_names[self.active_cam+1]
                 self.clicked_idx = self.active_cam + 1
             else:
-                self.clicked_camera = self.seq_keys[self.active_cam]
+                self.clicked_camera = self.camera_names[self.active_cam]
                 self.clicked_idx = self.active_cam
         
        # some commands have right-click-specific toggling
@@ -1027,23 +967,23 @@ class Annotator():
         
         #transform point into state space
         if point[0] > 1920:
-            cam = self.seq_keys[self.active_cam+1]
+            cam = self.camera_names[self.active_cam+1]
             point[0] -= 1920
         else:
-            cam = self.seq_keys[self.active_cam]
+            cam = self.camera_names[self.active_cam]
 
         point = torch.tensor([point[0],point[1]]).unsqueeze(0).unsqueeze(0).repeat(1,8,1)
-        state_point = self.chg.im_to_state(point,name = [cam], heights = torch.tensor([0])).squeeze(0)
+        state_point = self.hg.im_to_state(point,name = [cam], heights = torch.tensor([0])).squeeze(0)
         
         min_dist = np.inf
         min_id = None
         
-        for box in self.data[self.frame_idx].values():
-            
-            dist = (box["x"] - state_point[0] )**2 + (box["y"] - state_point[1])**2
+        for b_id  in self.data[self.frame_idx].keys():
+            box = self.data[self.frame_idx][b_id]
+            dist = (box[0]- state_point[0] )**2 + (box[1] - state_point[1])**2
             if dist < min_dist:
                 min_dist = dist
-                min_id = box["id"]  
+                min_id = b_id
         
         return min_id
 
@@ -1169,7 +1109,7 @@ class Annotator():
         for cam_idx, camera in enumerate(self.cameras):
             cam_name = camera.name
         
-            for obj_idx in range(self.get_unused_id()):
+            for obj_idx in range(self.next_object_id):
                 x = []
                 y = []
                 v = []
@@ -1261,7 +1201,7 @@ class Annotator():
             if f_idx > self.last_frame:# and len(self.data[f_idx]) == 0:
                 break
             
-            for cam in self.seq_keys:
+            for cam in self.camera_names:
                 
                 key = "{}_{}".format(cam,idx)
                 box = frame.get(key)
@@ -1280,7 +1220,7 @@ class Annotator():
         # a one foot change in space results in a _ pixel change in image space
          
         # convert boxes to im space - n_boxes x 8 x 2 in order: fbr,fbl,bbr,bbl,ftr,ftl,fbr,fbl
-        boxes_im = self.chg.state_to_im(boxes.float(),name = cameras)
+        boxes_im = self.hg.state_to_im(boxes.float(),name = cameras)
         
         # y_weight = width in pixels / width in feet
         #y_diff = torch.mean(torch.sum(torch.pow(boxes_im[:,[0,2],:] - boxes_im[:,[1,3],:],2), dim = 2).sqrt(),dim = 1)
@@ -1448,242 +1388,242 @@ class Annotator():
         return [t,x_spline,y_spline,avg_x,avg_xp]
     
     
-    def gen_trajectories(self):
-        spline_data = copy.deepcopy(self.data)
-        for idx in range(self.get_unused_id()):
-            if self.splines is None:
-                t,x_spline,y_spline,ape,mpe = self.create_trajectory(idx)
-            else:
-                x_spline,y_spline = self.splines[idx]
-            if x_spline is None: 
-                continue
-                print("skip")
+    # def gen_trajectories(self):
+    #     spline_data = copy.deepcopy(self.data)
+    #     for idx in range(self.get_unused_id()):
+    #         if self.splines is None:
+    #             t,x_spline,y_spline,ape,mpe = self.create_trajectory(idx)
+    #         else:
+    #             x_spline,y_spline = self.splines[idx]
+    #         if x_spline is None: 
+    #             continue
+    #             print("skip")
                 
-            for f_idx in range(len(spline_data)):
-                for cam in self.seq_keys:
-                    key = "{}_{}".format(cam,idx)
+    #         for f_idx in range(len(spline_data)):
+    #             for cam in self.camera_names:
+    #                 key = "{}_{}".format(cam,idx)
                     
-                    box = spline_data[f_idx].get(key)
-                    if box is not None:
-                        box["x"] = x_spline(box["timestamp"]).item()
-                        box["y"] = y_spline(box["timestamp"]).item()
+    #                 box = spline_data[f_idx].get(key)
+    #                 if box is not None:
+    #                     box["x"] = x_spline(box["timestamp"]).item()
+    #                     box["y"] = y_spline(box["timestamp"]).item()
             
-        self.spline_data = spline_data
+    #     self.spline_data = spline_data
       
-    def get_splines(self,plot = True,metric = "ape"):
-        splines = []
-        apes = []
-        ases = []
-        for idx in range(self.get_unused_id()):
-            t,x_spline,y_spline,ase,ape = self.create_trajectory(idx,plot = plot,metric = metric)
-            splines.append([x_spline,y_spline])
-            if ape is not None:
-                ases.append(ase)
-                apes.append(ape)
+    # def get_splines(self,plot = True,metric = "ape"):
+    #     splines = []
+    #     apes = []
+    #     ases = []
+    #     for idx in range(self.get_unused_id()):
+    #         t,x_spline,y_spline,ase,ape = self.create_trajectory(idx,plot = plot,metric = metric)
+    #         splines.append([x_spline,y_spline])
+    #         if ape is not None:
+    #             ases.append(ase)
+    #             apes.append(ape)
                 
-        print("Spline errors: {}ft ase, {}px ape".format(sum(ases)/len(ases),sum(apes)/len(apes)))    
-        self.splines = splines 
+    #     print("Spline errors: {}ft ase, {}px ape".format(sum(ases)/len(ases),sum(apes)/len(apes)))    
+    #     self.splines = splines 
      
-    def adjust_boxes_with_trajectories(self,max_shift_x = 2,max_shift_y = 2,verbose = False):
-        """
-        Adjust each box by up to max_shift pixels in x and y direction towards the best-fit spline
-        """               
+    # def adjust_boxes_with_trajectories(self,max_shift_x = 2,max_shift_y = 2,verbose = False):
+    #     """
+    #     Adjust each box by up to max_shift pixels in x and y direction towards the best-fit spline
+    #     """               
         
-        print("NOT IMPLEMENTED")
+    #     print("NOT IMPLEMENTED")
         
-        pixel_shifts = []
-        try:
-            self.splines
-        except:
-            print("Splines not yet fit - cannot adjust boxes using splines")
-            return
+    #     pixel_shifts = []
+    #     try:
+    #         self.splines
+    #     except:
+    #         print("Splines not yet fit - cannot adjust boxes using splines")
+    #         return
         
-        for f_idx,frame_data in enumerate(self.data):
+    #     for f_idx,frame_data in enumerate(self.data):
             
-            if f_idx > self.last_frame:
-                break
-            if len(self.data[f_idx]) == 0:
-                continue
+    #         if f_idx > self.last_frame:
+    #             break
+    #         if len(self.data[f_idx]) == 0:
+    #             continue
             
-            ids = [obj["id"] for obj in frame_data.values()]
-            cameras = [obj["camera"] for obj in frame_data.values()]
-            boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"],obj["timestamp"]],dtype = torch.double) for obj in frame_data.values()])
+    #         ids = [obj["id"] for obj in frame_data.values()]
+    #         cameras = [obj["camera"] for obj in frame_data.values()]
+    #         boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"],obj["timestamp"]],dtype = torch.double) for obj in frame_data.values()])
 
                 
-            boxes_im = self.hg.state_to_im(boxes.float(),name = cameras)
-            boxes = boxes.data.numpy()
+    #         boxes_im = self.hg.state_to_im(boxes.float(),name = cameras)
+    #         boxes = boxes.data.numpy()
             
-            # get feet per pixel ratio for y
-            y_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,2],:] - boxes_im[:,[1,3],:],dim = 1),2),dim = 1).sqrt()        
-            y_lim = (boxes[:,3] / y_diff * max_shift_y).data.numpy()
+    #         # get feet per pixel ratio for y
+    #         y_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,2],:] - boxes_im[:,[1,3],:],dim = 1),2),dim = 1).sqrt()        
+    #         y_lim = (boxes[:,3] / y_diff * max_shift_y).data.numpy()
             
-            # get feet per pixel ration for x        
-            x_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],dim = 1),2),dim = 1).sqrt()
-            x_lim = (boxes[:,2] / x_diff * max_shift_x).data.numpy()
+    #         # get feet per pixel ration for x        
+    #         x_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],dim = 1),2),dim = 1).sqrt()
+    #         x_lim = (boxes[:,2] / x_diff * max_shift_x).data.numpy()
             
-            # for each box
-            for i in range(len(ids)):
+    #         # for each box
+    #         for i in range(len(ids)):
                 
-                if self.splines[ids[i]][0] is not None:
-                    #get xpos on spline
-                    ts = boxes[i,6]
-                    x_spl = self.splines[ids[i]][0](ts)
+    #             if self.splines[ids[i]][0] is not None:
+    #                 #get xpos on spline
+    #                 ts = boxes[i,6]
+    #                 x_spl = self.splines[ids[i]][0](ts)
                     
-                    # get difference
-                    x_diff = x_spl - boxes[i,0]
+    #                 # get difference
+    #                 x_diff = x_spl - boxes[i,0]
                     
-                    if x_diff < -x_lim[i]:
-                        x_diff = -x_lim[i]
-                    elif x_diff > x_lim[i]:
-                        x_diff = x_lim[i]
+    #                 if x_diff < -x_lim[i]:
+    #                     x_diff = -x_lim[i]
+    #                 elif x_diff > x_lim[i]:
+    #                     x_diff = x_lim[i]
                     
-                    # move box either to spline or to x_lim
-                    key = "{}_{}".format(cameras[i],ids[i])
-                    frame_data[key]["x"] += x_diff
+    #                 # move box either to spline or to x_lim
+    #                 key = "{}_{}".format(cameras[i],ids[i])
+    #                 frame_data[key]["x"] += x_diff
                 
-                if self.splines[ids[i]][1] is not None:
-                    #get ypos on spline
-                    ts = boxes[i,6]
-                    y_spl = self.splines[ids[i]][1](ts)
+    #             if self.splines[ids[i]][1] is not None:
+    #                 #get ypos on spline
+    #                 ts = boxes[i,6]
+    #                 y_spl = self.splines[ids[i]][1](ts)
                     
-                    # get difference
-                    y_diff = y_spl - boxes[i,1]
+    #                 # get difference
+    #                 y_diff = y_spl - boxes[i,1]
                 
-                    if y_diff < -y_lim[i]:
-                        y_diff = -y_lim[i]
-                    elif y_diff > y_lim[i]:
-                        y_diff = y_lim[i]
+    #                 if y_diff < -y_lim[i]:
+    #                     y_diff = -y_lim[i]
+    #                 elif y_diff > y_lim[i]:
+    #                     y_diff = y_lim[i]
                     
-                    # move box either to spline or to x_lim
-                    key = "{}_{}".format(cameras[i],ids[i])
-                    frame_data[key]["y"] += y_diff
+    #                 # move box either to spline or to x_lim
+    #                 key = "{}_{}".format(cameras[i],ids[i])
+    #                 frame_data[key]["y"] += y_diff
                     
-                    pixel_shifts.append(np.sqrt(x_diff**2 + y_diff**2))
+    #                 pixel_shifts.append(np.sqrt(x_diff**2 + y_diff**2))
             
-            if verbose and (f_idx %100 == 0): print("Adusted boxes for frame {}".format(f_idx))
+    #         if verbose and (f_idx %100 == 0): print("Adusted boxes for frame {}".format(f_idx))
             
-        return pixel_shifts
+    #     return pixel_shifts
            
                         
-    def adjust_ts_with_trajectories(self,max_shift = 1,trials = 101,overwrite_ts_data = False,metric = "ape", use_running_error = False,verbose = True):
+    # def adjust_ts_with_trajectories(self,max_shift = 1,trials = 101,overwrite_ts_data = False,metric = "ape", use_running_error = False,verbose = True):
         
-        print("NOT IMPLEMENTED")
+    #     print("NOT IMPLEMENTED")
         
-        splines = self.splines
+    #     splines = self.splines
         
-        running_error = [self.ts_bias[i] for i in range(len(self.seq_keys))]
-        if not use_running_error:
-            running_error = [0 for item in running_error]
+    #     running_error = [self.ts_bias[i] for i in range(len(self.camera_names))]
+    #     if not use_running_error:
+    #         running_error = [0 for item in running_error]
 
-        # for each camera, for each frame, get labels
-        for f_idx,frame_data in enumerate(self.data):
+    #     # for each camera, for each frame, get labels
+    #     for f_idx,frame_data in enumerate(self.data):
             
-            if f_idx % 100 == 0:
-                print("Adjusting ts for frame {}".format(f_idx))
+    #         if f_idx % 100 == 0:
+    #             print("Adjusting ts for frame {}".format(f_idx))
                 
-            if f_idx > self.last_frame and len(self.data[f_idx]) == 0:
-                break 
-            for c_idx, cam in enumerate(self.seq_keys):
+    #         if f_idx > self.last_frame and len(self.data[f_idx]) == 0:
+    #             break 
+    #         for c_idx, cam in enumerate(self.camera_names):
                 
-                # get all frame/camera labels
-                objs = []
-                ids = []
-                for idx in range(self.get_unused_id()):
-                    key = "{}_{}".format(cam,idx)
-                    obj = frame_data.get(key)
+    #             # get all frame/camera labels
+    #             objs = []
+    #             ids = []
+    #             for idx in range(self.get_unused_id()):
+    #                 key = "{}_{}".format(cam,idx)
+    #                 obj = frame_data.get(key)
                     
-                    if obj is not None:
-                        objs.append(obj)
-                        ids.append(idx)
+    #                 if obj is not None:
+    #                     objs.append(obj)
+    #                     ids.append(idx)
                 
-                id_splines = [splines[id][0] for id in ids]
-                yid_splines = [splines[id][1] for id in ids]
+    #             id_splines = [splines[id][0] for id in ids]
+    #             yid_splines = [splines[id][1] for id in ids]
                 
-                if len(id_splines) == 0:
-                    continue
+    #             if len(id_splines) == 0:
+    #                 continue
                 
-                # get x_weights
-                boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"],obj["timestamp"]],dtype = torch.double) for obj in objs])
+    #             # get x_weights
+    #             boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"],obj["timestamp"]],dtype = torch.double) for obj in objs])
                 
-                # a one foot change in space results in a _ pixel change in image spac         
-                # convert boxes to im space - n_boxes x 8 x 2 in order: fbr,fbl,bbr,bbl,ftr,ftl,fbr,fbl
-                cname = [cam for i in range(len(boxes))]
-                #boxes_im = self.chg.state_to_im(boxes.float(),name = cname)
-                boxes_im = self.hg.state_to_im(boxes.float(),name = cam)
+    #             # a one foot change in space results in a _ pixel change in image spac         
+    #             # convert boxes to im space - n_boxes x 8 x 2 in order: fbr,fbl,bbr,bbl,ftr,ftl,fbr,fbl
+    #             cname = [cam for i in range(len(boxes))]
+    #             #boxes_im = self.hg.state_to_im(boxes.float(),name = cname)
+    #             boxes_im = self.hg.state_to_im(boxes.float(),name = cam)
 
                 
                 
-                # x_weight = length in pixels / legnth in feet
+    #             # x_weight = length in pixels / legnth in feet
                
                 
-                # remove all objects without valid splines from consideration
-                keep = [True if item is not None else False for item in id_splines]
-                keep_splines = []
-                for i in range(len(keep)):
-                    if keep[i]:
-                        keep_splines.append(id_splines[i])
-                id_splines = keep_splines
+    #             # remove all objects without valid splines from consideration
+    #             keep = [True if item is not None else False for item in id_splines]
+    #             keep_splines = []
+    #             for i in range(len(keep)):
+    #                 if keep[i]:
+    #                     keep_splines.append(id_splines[i])
+    #             id_splines = keep_splines
                 
                 
-                x_weight = 1
-                if True:
-                    #x_diff = torch.mean(torch.sum(torch.pow(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],2), dim = 2).sqrt(),dim = 1)
-                    x_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],dim = 1),2),dim = 1).sqrt()
-                    x_weight = x_diff / boxes[:,2]  
-                    x_weight = x_weight[keep]
+    #             x_weight = 1
+    #             if True:
+    #                 #x_diff = torch.mean(torch.sum(torch.pow(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],2), dim = 2).sqrt(),dim = 1)
+    #                 x_diff = torch.sum(torch.pow(torch.mean(boxes_im[:,[0,1],:] - boxes_im[:,[2,3],:],dim = 1),2),dim = 1).sqrt()
+    #                 x_weight = x_diff / boxes[:,2]  
+    #                 x_weight = x_weight[keep]
                 
-                boxes = boxes[keep]
+    #             boxes = boxes[keep]
 
                 
-                if len(id_splines) == 0:
-                    continue
+    #             if len(id_splines) == 0:
+    #                 continue
                 
-                best_time = copy.deepcopy(self.all_ts[f_idx][cam])
-                best_error = np.inf
+    #             best_time = copy.deepcopy(self.all_ts[f_idx][cam])
+    #             best_error = np.inf
                 
-                #get initial error
-                xs = torch.tensor([id_splines[i](best_time).item() for i in range(len(id_splines))])
-                xlabel = boxes[:,0]
-                if metric == "ape":
-                        init_error = torch.mean(((xs-xlabel)*x_weight).pow(2)).sqrt()
-                else:
-                        init_error =  torch.max(((xs-xlabel)*x_weight).pow(2)).sqrt()            
+    #             #get initial error
+    #             xs = torch.tensor([id_splines[i](best_time).item() for i in range(len(id_splines))])
+    #             xlabel = boxes[:,0]
+    #             if metric == "ape":
+    #                     init_error = torch.mean(((xs-xlabel)*x_weight).pow(2)).sqrt()
+    #             else:
+    #                     init_error =  torch.max(((xs-xlabel)*x_weight).pow(2)).sqrt()            
                 
-                for shift in np.linspace(-max_shift,max_shift,trials):
-                    if use_running_error:
-                        shift += running_error[c_idx]
-                    new_time = self.all_ts[f_idx][cam] + shift 
+    #             for shift in np.linspace(-max_shift,max_shift,trials):
+    #                 if use_running_error:
+    #                     shift += running_error[c_idx]
+    #                 new_time = self.all_ts[f_idx][cam] + shift 
                 
-                    # for each timestamp shift, compute the error between spline position and label position
-                    xs = torch.tensor([id_splines[i](new_time).item() for i in range(len(id_splines))])
-                    xlabel = boxes[:,0]
+    #                 # for each timestamp shift, compute the error between spline position and label position
+    #                 xs = torch.tensor([id_splines[i](new_time).item() for i in range(len(id_splines))])
+    #                 xlabel = boxes[:,0]
                     
 
                     
-                    if metric == "ape":
-                        mse = torch.mean(((xs-xlabel)*x_weight).pow(2)).sqrt()
-                    else:
-                        mse =  torch.max(((xs-xlabel)*x_weight).pow(2)).sqrt()
+    #                 if metric == "ape":
+    #                     mse = torch.mean(((xs-xlabel)*x_weight).pow(2)).sqrt()
+    #                 else:
+    #                     mse =  torch.max(((xs-xlabel)*x_weight).pow(2)).sqrt()
                         
-                    if mse < best_error:
-                        best_error = mse
-                        best_time = new_time
+    #                 if mse < best_error:
+    #                     best_error = mse
+    #                     best_time = new_time
                 
-                if verbose:
-                    print("{} frame {}: shifted time by {:.3f}s --- {:.2f}x initial error".format(cam,f_idx,best_time - self.all_ts[f_idx][cam],best_error/init_error))
+    #             if verbose:
+    #                 print("{} frame {}: shifted time by {:.3f}s --- {:.2f}x initial error".format(cam,f_idx,best_time - self.all_ts[f_idx][cam],best_error/init_error))
                 
-                for idx in range(self.get_unused_id()):
-                    key = "{}_{}".format(cam,idx)
-                    obj = frame_data.get(key)
+    #             for idx in range(self.get_unused_id()):
+    #                 key = "{}_{}".format(cam,idx)
+    #                 obj = frame_data.get(key)
                     
-                    if obj is not None:
-                        self.data[f_idx][key]["timestamp"] = best_time
+    #                 if obj is not None:
+    #                     self.data[f_idx][key]["timestamp"] = best_time
                 
-                if overwrite_ts_data:
-                    self.all_ts[f_idx][cam] = best_time
+    #             if overwrite_ts_data:
+    #                 self.all_ts[f_idx][cam] = best_time
 
-                if use_running_error:
-                    running_error[c_idx] += shift
+    #             if use_running_error:
+    #                 running_error[c_idx] += shift
         
         
         
@@ -1703,7 +1643,7 @@ class Annotator():
         for cam_idx, camera in enumerate(self.cameras):
             cam_name = camera.name
         
-            for obj_idx in range(self.get_unused_id()):
+            for obj_idx in range(self.next_object_id):
                 x = []
                 y = []
                 v = []
@@ -1775,305 +1715,305 @@ class Annotator():
         
         plt.show()  
 
-    def replace_timestamps(self):
-        """
-        Replace timestamps with timestamps at nominal framerate. 
-        Then reinterpolate boxes based on these timestamps
-        """
+    # def replace_timestamps(self):
+    #     """
+    #     Replace timestamps with timestamps at nominal framerate. 
+    #     Then reinterpolate boxes based on these timestamps
+    #     """
         
-        # get nominal framerate for each camera
-        start_ts = [self.all_ts[0][key] for key in self.seq_keys]
-        spans = [self.all_ts[-1][key] - self.all_ts[0][key] for key in self.seq_keys]
-        frame_count = len(self.all_ts)
+    #     # get nominal framerate for each camera
+    #     start_ts = [self.all_ts[0][key] for key in self.camera_names]
+    #     spans = [self.all_ts[-1][key] - self.all_ts[0][key] for key in self.camera_names]
+    #     frame_count = len(self.all_ts)
         
-        fps_nom = [frame_count/spans[i] for i in range(len(spans))]
-        print (fps_nom)
+    #     fps_nom = [frame_count/spans[i] for i in range(len(spans))]
+    #     print (fps_nom)
         
-        # modify self.ts for each camera
-        for i in range(len(self.all_ts)):
-            for j in range(len(self.seq_keys)):
-                key = self.seq_keys[j]
-                self.all_ts[i][key] = start_ts[j] + 1.0/fps_nom[j]*i
+    #     # modify self.ts for each camera
+    #     for i in range(len(self.all_ts)):
+    #         for j in range(len(self.camera_names)):
+    #             key = self.camera_names[j]
+    #             self.all_ts[i][key] = start_ts[j] + 1.0/fps_nom[j]*i
         
-        # ts bias dictionary
-        #ts_bias_dict =  dict([ (self.seq_keys[i],self.ts_bias[i]) for i in range(len(self.ts_bias))])
+    #     # ts bias dictionary
+    #     #ts_bias_dict =  dict([ (self.camera_names[i],self.ts_bias[i]) for i in range(len(self.ts_bias))])
         
-        new_data = []
-        # overwrite timestamps in all labels
-        for f_idx in range(len(self.data)):
-            new_data.append({})
-            for key in self.data[f_idx]:
-                cam = self.data[f_idx][key]["camera"]
-                self.data[f_idx][key]["timestamp"] = self.all_ts[f_idx][cam] #+ ts_bias_dict[cam]
+    #     new_data = []
+    #     # overwrite timestamps in all labels
+    #     for f_idx in range(len(self.data)):
+    #         new_data.append({})
+    #         for key in self.data[f_idx]:
+    #             cam = self.data[f_idx][key]["camera"]
+    #             self.data[f_idx][key]["timestamp"] = self.all_ts[f_idx][cam] #+ ts_bias_dict[cam]
                 
-                if "gen" in self.data[f_idx][key].keys() and self.data[f_idx][key]["gen"] != "Manual":
-                    continue
-                new_data[f_idx][key] =  copy.deepcopy(self.data[f_idx][key])
+    #             if "gen" in self.data[f_idx][key].keys() and self.data[f_idx][key]["gen"] != "Manual":
+    #                 continue
+    #             new_data[f_idx][key] =  copy.deepcopy(self.data[f_idx][key])
         
         
-        # delete and reinterpolate boxes as necessary
-        self.data = new_data
-        for i in range(self.get_unused_id()):
-            self.interpolate(i,verbose = False)
+    #     # delete and reinterpolate boxes as necessary
+    #     self.data = new_data
+    #     for i in range(self.get_unused_id()):
+    #         self.interpolate(i,verbose = False)
         
-        self.plot_all_trajectories()
-        print("Replaced timestamps")
+    #     self.plot_all_trajectories()
+    #     print("Replaced timestamps")
         
     
-    def unbias_timestamps(self):
-        """
-        Replace timestamps with timestamps at nominal framerate. 
-        Then reinterpolate boxes based on these timestamps
-        """
+    # def unbias_timestamps(self):
+    #     """
+    #     Replace timestamps with timestamps at nominal framerate. 
+    #     Then reinterpolate boxes based on these timestamps
+    #     """
         
-        # get nominal framerate for each camera
-        self.estimate_ts_bias()
+    #     # get nominal framerate for each camera
+    #     self.estimate_ts_bias()
         
-        print(self.ts_bias)
-        print(self.seq_keys)
+    #     print(self.ts_bias)
+    #     print(self.camera_names)
         
-        # ts bias dictionary
-        ts_bias_dict =  dict([ (self.seq_keys[i],self.ts_bias[i]) for i in range(len(self.seq_keys))])
+    #     # ts bias dictionary
+    #     ts_bias_dict =  dict([ (self.camera_names[i],self.ts_bias[i]) for i in range(len(self.camera_names))])
         
-        new_data = []
-        # overwrite timestamps in all labels
-        for f_idx in range(len(self.data)):
-            new_data.append({})
-            for key in self.data[f_idx]:
-                cam = self.data[f_idx][key]["camera"]
-                try:
-                    self.data[f_idx][key]["timestamp"] += ts_bias_dict[cam]
-                except:
-                    print("KeyError")
+    #     new_data = []
+    #     # overwrite timestamps in all labels
+    #     for f_idx in range(len(self.data)):
+    #         new_data.append({})
+    #         for key in self.data[f_idx]:
+    #             cam = self.data[f_idx][key]["camera"]
+    #             try:
+    #                 self.data[f_idx][key]["timestamp"] += ts_bias_dict[cam]
+    #             except:
+    #                 print("KeyError")
                 
-        # overwrite timestamps in self.all_ts
-        for f_idx in range(len(self.all_ts)):
-            for i in range(len(self.seq_keys)):
-                key = self.seq_keys[i]
-                try:
-                    self.all_ts[f_idx][key] += self.ts_bias[i]
-                except KeyError:
-                    print("KeyError")
-                    pass
+    #     # overwrite timestamps in self.all_ts
+    #     for f_idx in range(len(self.all_ts)):
+    #         for i in range(len(self.camera_names)):
+    #             key = self.camera_names[i]
+    #             try:
+    #                 self.all_ts[f_idx][key] += self.ts_bias[i]
+    #             except KeyError:
+    #                 print("KeyError")
+    #                 pass
                 
-        print("Un-biased timestamps")
+    #     print("Un-biased timestamps")
             
-    def replace_homgraphy(self):
-        raise Exception ("Dont Call this!")
+    # def replace_homgraphy(self):
+    #     raise Exception ("Dont Call this!")
         
-        # get replacement homography
-        hid = 5
-        with open("EB_homography{}.cpkl".format(hid),"rb") as f:
-            hg1 = pickle.load(f) 
-        with open("WB_homography{}.cpkl".format(hid),"rb") as f:
-            hg2 = pickle.load(f) 
-        hg_new  = Homography_Wrapper(hg1=hg1,hg2=hg2)    
+    #     # get replacement homography
+    #     hid = 5
+    #     with open("EB_homography{}.cpkl".format(hid),"rb") as f:
+    #         hg1 = pickle.load(f) 
+    #     with open("WB_homography{}.cpkl".format(hid),"rb") as f:
+    #         hg2 = pickle.load(f) 
+    #     hg_new  = Homography_Wrapper(hg1=hg1,hg2=hg2)    
     
-        # # copy height scale values from old homography to new homography
-        # for corr in hg_new.hg1.correspondence.keys():
-        #     if corr in self.hg.hg1.correspondence.keys():
-        #         hg_new.hg1.correspondence[corr]["P"][]
-        # if direction == 1:
-        #         self.hg.hg1.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
-        #     else:   
-        #         self.hg.hg2.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
+    #     # # copy height scale values from old homography to new homography
+    #     # for corr in hg_new.hg1.correspondence.keys():
+    #     #     if corr in self.hg.hg1.correspondence.keys():
+    #     #         hg_new.hg1.correspondence[corr]["P"][]
+    #     # if direction == 1:
+    #     #         self.hg.hg1.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
+    #     #     else:   
+    #     #         self.hg.hg2.correspondence[self.clicked_camera]["P"][:,2] *= sign*delta
         
-        # create new copy of data
-        new_data = []
-        all_errors = [0]
-        # for each frame in data
-        for f_idx,frame_data in enumerate(self.data):
+    #     # create new copy of data
+    #     new_data = []
+    #     all_errors = [0]
+    #     # for each frame in data
+    #     for f_idx,frame_data in enumerate(self.data):
             
-            if f_idx > self.last_frame:
-                break
+    #         if f_idx > self.last_frame:
+    #             break
             
-            new_data.append({})
-            if f_idx % 100 == 0:
-                print("On frame {}. Average error so far: {}".format(f_idx,sum(all_errors)/len(all_errors)))
+    #         new_data.append({})
+    #         if f_idx % 100 == 0:
+    #             print("On frame {}. Average error so far: {}".format(f_idx,sum(all_errors)/len(all_errors)))
             
-            # for each camera in frame data
-            for camera in self.cameras:
-                cam = camera.name
+    #         # for each camera in frame data
+    #         for camera in self.cameras:
+    #             cam = camera.name
                 
-                # for each box in camera 
-                for obj_idx in range(self.get_unused_id()):
-                   key = "{}_{}".format(cam,obj_idx)
-                   if frame_data.get(key): 
-                       obj = frame_data.get(key)
+    #             # for each box in camera 
+    #             for obj_idx in range(self.get_unused_id()):
+    #                key = "{}_{}".format(cam,obj_idx)
+    #                if frame_data.get(key): 
+    #                    obj = frame_data.get(key)
                        
-                       # if box was manually drawn
-                       if obj["gen"] == "Manual":
+    #                    # if box was manually drawn
+    #                    if obj["gen"] == "Manual":
                            
-                           base = copy.deepcopy(obj)
+    #                        base = copy.deepcopy(obj)
                            
-                           # get old box image coordinates
-                           old_box = torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).unsqueeze(0)
-                           old_box_im = self.hg.state_to_im(old_box,name = cam)
+    #                        # get old box image coordinates
+    #                        old_box = torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).unsqueeze(0)
+    #                        old_box_im = self.hg.state_to_im(old_box,name = cam)
                            
-                           # find new box that minimizes the reprojection error of corner coordinates
-                           center = obj["x"],obj["y"]
-                           search_rad = 50
-                           grid_size = 11
-                           while search_rad > 1:
-                               x = np.linspace(center[0]-search_rad,center[0]+search_rad,grid_size)
-                               y = np.linspace(center[1]-search_rad,center[1]+search_rad,grid_size)
-                               shifts = []
-                               for i in x:
-                                   for j in y:
-                                       shift_box = torch.tensor([i,j, base["l"],base["w"],base["h"],base["direction"]])
-                                       shifts.append(shift_box)
+    #                        # find new box that minimizes the reprojection error of corner coordinates
+    #                        center = obj["x"],obj["y"]
+    #                        search_rad = 50
+    #                        grid_size = 11
+    #                        while search_rad > 1:
+    #                            x = np.linspace(center[0]-search_rad,center[0]+search_rad,grid_size)
+    #                            y = np.linspace(center[1]-search_rad,center[1]+search_rad,grid_size)
+    #                            shifts = []
+    #                            for i in x:
+    #                                for j in y:
+    #                                    shift_box = torch.tensor([i,j, base["l"],base["w"],base["h"],base["direction"]])
+    #                                    shifts.append(shift_box)
                                     
-                               # convert shifted grid of boxes into 2D space
-                               shifts = torch.stack(shifts)
-                               boxes_space = hg_new.state_to_im(shifts,name = cam)
+    #                            # convert shifted grid of boxes into 2D space
+    #                            shifts = torch.stack(shifts)
+    #                            boxes_space = hg_new.state_to_im(shifts,name = cam)
                                  
                                 
                                 
-                               # compute error between old_box_im and each shifted box footprints
-                               box_expanded = old_box_im.repeat(boxes_space.shape[0],1,1)  
-                               error = ((boxes_space[:,:4,:] - box_expanded[:,:4,:])**2).mean(dim = 2).mean(dim = 1)
+    #                            # compute error between old_box_im and each shifted box footprints
+    #                            box_expanded = old_box_im.repeat(boxes_space.shape[0],1,1)  
+    #                            error = ((boxes_space[:,:4,:] - box_expanded[:,:4,:])**2).mean(dim = 2).mean(dim = 1)
                                 
-                               # find min_error and assign to center
-                               min_idx = torch.argmin(error)
-                               center = x[min_idx//grid_size],y[min_idx%grid_size]
-                               search_rad /= 5
+    #                            # find min_error and assign to center
+    #                            min_idx = torch.argmin(error)
+    #                            center = x[min_idx//grid_size],y[min_idx%grid_size]
+    #                            search_rad /= 5
                                 
-                           # save box
-                           min_err = error[min_idx].item()
-                           all_errors.append(min_err)
-                           base["x"] = self.safe(center[0])
-                           base["y"] = self.safe(center[1])
+    #                        # save box
+    #                        min_err = error[min_idx].item()
+    #                        all_errors.append(min_err)
+    #                        base["x"] = self.safe(center[0])
+    #                        base["y"] = self.safe(center[1])
                            
-                           new_data[f_idx][key] = base
+    #                        new_data[f_idx][key] = base
                            
-                           # di = "EB" if obj["direction"] == 1 else "WB"
-                           # print("Camera {}, {} obj {}: Error {}".format(cam,di,obj_idx,min_err))
+    #                        # di = "EB" if obj["direction"] == 1 else "WB"
+    #                        # print("Camera {}, {} obj {}: Error {}".format(cam,di,obj_idx,min_err))
                            
         
         
-        # overwrite self.data with new_data
-        self.data = new_data
-        # overwrite self.hg with hg_new
-        self.hg = hg_new
+    #     # overwrite self.data with new_data
+    #     self.data = new_data
+    #     # overwrite self.hg with hg_new
+    #     self.hg = hg_new
                 
-        # reinterpolate rest of data
-        for i in range(self.get_unused_id()):
-            self.interpolate(i,verbose = False)
+    #     # reinterpolate rest of data
+    #     for i in range(self.get_unused_id()):
+    #         self.interpolate(i,verbose = False)
         
-        self.plot_all_trajectories()
+    #     self.plot_all_trajectories()
 
             
-    def replace_y(self,reverse  = False):
+    # def replace_y(self,reverse  = False):
             
-        # create new copy of data
-        new_data = []
+    #     # create new copy of data
+    #     new_data = []
         
-        # for each frame in data
-        for f_idx,frame_data in enumerate(self.data):
+    #     # for each frame in data
+    #     for f_idx,frame_data in enumerate(self.data):
             
-            if f_idx > self.last_frame and len(self.data[f_idx]) == 0:
-                break
+    #         if f_idx > self.last_frame and len(self.data[f_idx]) == 0:
+    #             break
             
-            new_data.append({})
-            if f_idx % 100 == 0:
-                print("On frame {}.".format(f_idx))
+    #         new_data.append({})
+    #         if f_idx % 100 == 0:
+    #             print("On frame {}.".format(f_idx))
             
-            # for each camera in frame data
-            for camera in self.cameras:
-                cam = camera.name
+    #         # for each camera in frame data
+    #         for camera in self.cameras:
+    #             cam = camera.name
                 
-                # for each box in camera 
-                for obj_idx in range(self.get_unused_id()):
-                   key = "{}_{}".format(cam,obj_idx)
-                   if frame_data.get(key): 
-                       obj = frame_data.get(key)
+    #             # for each box in camera 
+    #             for obj_idx in range(self.get_unused_id()):
+    #                key = "{}_{}".format(cam,obj_idx)
+    #                if frame_data.get(key): 
+    #                    obj = frame_data.get(key)
                        
-                       # if box was manually drawn
+    #                    # if box was manually drawn
                        
-                       if "gen" not in obj.keys() or obj["gen"] == "Manual":
+    #                    if "gen" not in obj.keys() or obj["gen"] == "Manual":
                            
-                           base = copy.deepcopy(obj)
-                           new_box = self.offset_box_y(base,reverse = reverse)
+    #                        base = copy.deepcopy(obj)
+    #                        new_box = self.offset_box_y(base,reverse = reverse)
                            
-                           new_data[f_idx][key] = new_box
+    #                        new_data[f_idx][key] = new_box
                            
-        # overwrite self.data with new_data
-        self.data = new_data
+    #     # overwrite self.data with new_data
+    #     self.data = new_data
         
-        # reinterpolate rest of data
-        for i in range(self.get_unused_id()):
-            self.interpolate(i,verbose = False) 
+    #     # reinterpolate rest of data
+    #     for i in range(self.get_unused_id()):
+    #         self.interpolate(i,verbose = False) 
             
 
         
-        self.plot_all_trajectories()
+    #     self.plot_all_trajectories()
 
             
-    def offset_box_y(self,box,reverse = False):
+    # def offset_box_y(self,box,reverse = False):
         
-        camera = box["camera"]
-        direction = box["direction"]
+    #     camera = box["camera"]
+    #     direction = box["direction"]
         
-        x = box["x"]
+    #     x = box["x"]
         
         
-        direct =  "_EB" if direction == 1 else"_WB"
-        key = camera + direct
+    #     direct =  "_EB" if direction == 1 else"_WB"
+    #     key = camera + direct
         
-        p2,p1,p0 = self.poly_params[key]
+    #     p2,p1,p0 = self.poly_params[key]
         
-        y_offset = x**2*p2 + x*p1 + p0
+    #     y_offset = x**2*p2 + x*p1 + p0
         
-        # if on the WB side, we need to account for the non-zero location of the leftmost line so we don't shift all the way back to near 0
-        if direction == -1:
-            y_straight_offset = self.hg.hg2.correspondence[camera]["space_pts"][0][1]
-            y_offset -= y_straight_offset
+    #     # if on the WB side, we need to account for the non-zero location of the leftmost line so we don't shift all the way back to near 0
+    #     if direction == -1:
+    #         y_straight_offset = self.hg.hg2.correspondence[camera]["space_pts"][0][1]
+    #         y_offset -= y_straight_offset
             
-        if not reverse:
-            box["y"] -= y_offset
-        else:
-            box["y"] += y_offset
+    #     if not reverse:
+    #         box["y"] -= y_offset
+    #     else:
+    #         box["y"] += y_offset
 
         
-        return box
+    #     return box
             
         
-    def fit_curvature(self,box,min_pts = 4):   
-        """
-        Stores clicked points in array for each camera. If >= min_pts points have been clicked, after each subsequent clicked point the curvature lines are refit
-        """
+    # def fit_curvature(self,box,min_pts = 4):   
+    #     """
+    #     Stores clicked points in array for each camera. If >= min_pts points have been clicked, after each subsequent clicked point the curvature lines are refit
+    #     """
         
-        point = self.box_to_state(box)[0]
-        direction = "_EB" if point[1] < 60 else "_WB"
+    #     point = self.box_to_state(box)[0]
+    #     direction = "_EB" if point[1] < 60 else "_WB"
 
-        # store point in curvature_points[cam_idx]
-        self.curve_points[self.clicked_camera+direction].append(point)
+    #     # store point in curvature_points[cam_idx]
+    #     self.curve_points[self.clicked_camera+direction].append(point)
         
-        # if there are sufficient fitting points, recompute poly_params for active camera
-        if len(self.curve_points[self.clicked_camera+direction]) >= min_pts:
-            x_curve = np.array([self.safe(p[0]) for p in self.curve_points[self.clicked_camera+direction]])
-            y_curve = np.array([self.safe(p[1]) for p in self.curve_points[self.clicked_camera+direction]])
-            pparams = np.polyfit(x_curve,y_curve,2)
-            print("Fit {} poly params for camera {}".format(self.clicked_camera,direction))
-            self.poly_params[self.clicked_camera+direction] = pparams
+    #     # if there are sufficient fitting points, recompute poly_params for active camera
+    #     if len(self.curve_points[self.clicked_camera+direction]) >= min_pts:
+    #         x_curve = np.array([self.safe(p[0]) for p in self.curve_points[self.clicked_camera+direction]])
+    #         y_curve = np.array([self.safe(p[1]) for p in self.curve_points[self.clicked_camera+direction]])
+    #         pparams = np.polyfit(x_curve,y_curve,2)
+    #         print("Fit {} poly params for camera {}".format(self.clicked_camera,direction))
+    #         self.poly_params[self.clicked_camera+direction] = pparams
             
-            self.plot()
+    #         self.plot()
 
     
-    def erase_curvature(self,box):
-        """
-        Removes all clicked curvature points for selected camera
-        """
-        point = self.box_to_state(box)[0]
+    # def erase_curvature(self,box):
+    #     """
+    #     Removes all clicked curvature points for selected camera
+    #     """
+    #     point = self.box_to_state(box)[0]
         
-        direction = "_EB" if point[1] < 60 else "_WB"
-        # erase all points
-        self.curve_points[self.clicked_camera+direction] = []
+    #     direction = "_EB" if point[1] < 60 else "_WB"
+    #     # erase all points
+    #     self.curve_points[self.clicked_camera+direction] = []
 
-        # reset curvature polynomial coefficients to 0
-        self.poly_params[self.clicked_camera+direction] = [0,0,0]
+    #     # reset curvature polynomial coefficients to 0
+    #     self.poly_params[self.clicked_camera+direction] = [0,0,0]
         
-        self.plot()
+    #     self.plot()
     
     def estimate_ts_bias(self):
         """
@@ -2098,7 +2038,7 @@ class Annotator():
                 
                 diffs = []
                 
-                for obj_idx in range(self.get_unused_id()):
+                for obj_idx in range(self.next_object_id):
                     
                     # check whether object exists in both cameras and overlaps
                     c1x = []
@@ -2199,7 +2139,7 @@ class Annotator():
             
             diffs = []
             
-            for obj_idx in range(self.get_unused_id()):
+            for obj_idx in range(self.next_object_id):
                 
                 # check whether object exists in both cameras and overlaps
                 c1x = []
@@ -2272,14 +2212,14 @@ class Annotator():
     
     def save2(self):
         with open("chg_labels_sequence_{}.cpkl".format(self.scene_id),"wb") as f:
-            data = [self.data,self.all_ts,self.ts_bias,self.chg]
+            data = [self.data,self.all_ts,self.ts_bias,self.hg]
             pickle.dump(data,f)
             print("Saved labels")
             self.count()
             
     def reload_chg_data(self):
         with open("chg_labels_sequence_{}.cpkl".format(self.scene_id),"rb") as f:
-            self.data,self.all_ts,self.ts_bias,self.chg = pickle.load(f)
+            self.data,self.all_ts,self.ts_bias,self.hg = pickle.load(f)
             print("Reloaded data")
         
     def reload(self):
@@ -2324,7 +2264,10 @@ class Annotator():
                     
                 elif self.active_command == "ADD":
                     # get obj_idx
-                    obj_idx = self.get_unused_id()
+                    obj_idx = self.next_object_id
+                    self.next_object_id += 1
+                    
+                    
                     self.add(obj_idx,self.new)
                 
                 # Shift object
