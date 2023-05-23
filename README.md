@@ -4,8 +4,8 @@
 - [X] Get i24-rcs to publish as a usable repository correctly
 - [X] Switch to GPU hardware decoder for frame loading
 - [X] Deal with loading data in middle of buffer
-- [ ] Shift from flat homography to i24-rcs
-- [ ] Ensure `add()`, `dimension()`, `shift()`, and `copy_paste()` work
+- [X] Shift from flat homography to i24-rcs
+- [X] Ensure `add()`, `dimension()`, `shift()`, and `copy_paste()` work
 - [ ] Add save() and quit() and make sure reload works
 - [ ] Add timestamp file parser and display time in `plot()`
 - [ ] Implement fast object initializer - we assume all vehicles are Nissan Rogues which makes things pretty easy
