@@ -72,14 +72,14 @@ class Annotator:
         
         
         # frame indexed data array since we'll plot by frames
-        self.data = [{} for i in range(10000)] # each frame 
+        self.data = [{} for i in range(5000)] # each frame 
         
         
         self.frame_idx = 0
         self.toggle_auto = True
         self.AUTO = True
 
-        self.buffer(100)
+        self.buffer(10)
         
         
         #### get homography
@@ -138,7 +138,7 @@ class Annotator:
     
     
         # load GPS data
-        gps_data_cache = "./data/GPS.cpkl"
+        gps_data_cache = "./data/GPS2.cpkl"
         try:
             with open(gps_data_cache,"rb") as f:
                 self.gps = pickle.load(f)
@@ -305,7 +305,7 @@ class Annotator:
                          "run":veh_counter,
                          "l":l,
                          "w":w,
-                         "h":h
+                         "h":h,
                          }
                         
                         veh_counter += 1
@@ -420,7 +420,10 @@ class Annotator:
            # remove all boxes entirely out of image ?
            # TODO maybe if necessary 
 
-           
+           for j in range(len(ids)):
+              id = ids[j]
+              if self.objects[id] is not None and self.objects[id]["gps_id"] is not None:
+                   ids[j] = str(id) + " ({})".format(self.objects[id]["gps_id"])
            # plot boxes with ids
            if len(ids) > 0:
                boxes = torch.stack(boxes)
@@ -605,7 +608,10 @@ class Annotator:
     #     os.system("/usr/bin/ffmpeg -i {} -vcodec libx264 {}".format(temp_name,f_name))
         
         
-
+    def associate(self,id,gps_id):
+        self.objects[id]["gps_id"] = gps_id
+        
+            
     def add(self,obj_idx,location):
         
         xy = self.box_to_state(location)[0,:].data.numpy()
@@ -619,7 +625,8 @@ class Annotator:
             "class":"midsize",
             "source":self.clicked_camera,
             "sink": None,
-            "complete":0
+            "complete":0,
+            "gps_id":None
             }
         
         timestamp  = 0 # TODO
@@ -1147,7 +1154,7 @@ class Annotator:
 
     def keyboard_input(self):
         keys = ""
-        letters = string.ascii_lowercase + string.digits
+        letters = string.ascii_lowercase + string.digits + "_"
         while True:
             key = cv2.waitKey(1)
             for letter in letters:
@@ -2421,6 +2428,11 @@ class Annotator:
                         cls = "midsize"
                     self.change_class(obj_idx,cls)
                     
+                elif self.active_command == "ASSOCIATE":
+                    obj_idx = self.find_box(self.new)
+                    pair = self.keyboard_input()
+                    self.associate(obj_idx,pair)
+                
                 # adjust homography
                 elif self.active_command == "HOMOGRAPHY":
                     self.correct_homography_Z(self.new)
@@ -2522,12 +2534,8 @@ class Annotator:
                self.active_command = "TIME BIAS"
            elif key == ord("h"):
                self.active_command = "HOMOGRAPHY"
-           # elif key == ord("p"):
-           #     self.active_command = "2D PASTE"
            elif key == ord("*"):
-               self.active_command = "CURVE"
-           elif key == ord("&"):
-               self.active_command = "ERASE CURVE"
+                self.active_command = "ASSOCIATE"
                
           
            elif self.active_command == "COPY PASTE" and self.copied_box:
