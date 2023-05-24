@@ -11,6 +11,7 @@
 - [X] Design data structure for holding object completeness (red if there is no sink camera, green otherwise)
 - [X] Implement auto-box detection (verify that it still works)
 - [X] Add save() and quit() and make sure reload works
-- [ ] Add timestamp file parser and display time in `plot()`
-- [ ] Add GPS box data
+- [X] Add timestamp file parser and display time in `plot()`
+- [X] Add GPS box data
+- [ ] Associate objects with GPS objects
 - [ ] Automatically advance camera and frame after selecting a box based on next GPS location
