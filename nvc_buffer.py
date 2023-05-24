@@ -44,6 +44,7 @@ class NVC_Buffer():
                 loader = GPUBackendFrameGetter(os.path.join(directory,camera_dir),idx,ctx,resize = resize)
                 self.cameras_per_device[idx] += 1
                 self.loaders[cam_name] = loader
+                time.sleep(0.1)
             
         self.frames = []
         self.ts = []
@@ -132,7 +133,7 @@ class GPUBackendFrameGetter:
         """
         
         
-        frame = self.queue.get(timeout = 10)
+        frame = self.queue.get(timeout = 20)
         ts = frame[1] #/ 10e8
         im = frame[0]
         

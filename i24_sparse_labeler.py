@@ -28,6 +28,7 @@ ctx = mp.get_context('spawn')
 
 # personal modules and packages
 from i24_rcs import I24_RCS
+from i24_database_api import DBClient
 from nvc_buffer import NVC_Buffer
 
 detector_path = os.path.join("retinanet")
@@ -35,12 +36,15 @@ sys.path.insert(0,detector_path)
 from retinanet.model import resnet50 
 
 
+import pyproj
+from pyproj import Proj, transform
+import pandas as pd
+import numpy as np
+import torch
 
-
-class Annotator():
+class Annotator:
     """ 
     """
-    
     
     def __init__(self,im_directory,hg_path,save_file = None):
         
@@ -59,7 +63,7 @@ class Annotator():
             c = int(camera.split("C")[-1].split(".")[0])
             shortname = camera.split(".")[0]
             
-            if c == 4 and p%2 == 0 and ".h264" in camera and p< 41:
+            if c == 4 and p%1 == 0 and ".h264" in camera and p< 41:
                 include_cameras.append(shortname)
            
         self.camera_names = include_cameras
@@ -75,7 +79,7 @@ class Annotator():
         self.toggle_auto = True
         self.AUTO = True
 
-        self.buffer(10)
+        self.buffer(100)
         
         
         #### get homography
@@ -131,6 +135,184 @@ class Annotator():
         self.plot_idx = 0        
         self.active_cam = 0
     
+    
+    
+        # load GPS data
+        gps_data_cache = "./data/GPS.cpkl"
+        try:
+            with open(gps_data_cache,"rb") as f:
+                self.gps = pickle.load(f)
+        except:
+            self.load_gps_data()
+            with open(gps_data_cache,"wb") as f:
+                pickle.dump(self.gps,f)
+    
+        print("Loaded annotator")
+    
+    def load_gps_data(self):
+        """
+        Load GPS file and convert to rcs. 
+        
+        
+        self.gps - dict of dicts, each with CIRCLES_id,dimensions, and array of x,y,time
+        """
+        
+        # collection = "637517698b5b68fc4fd40c77_CIRCLES_GPS"
+        # db_param = {
+        #       "host":"10.80.4.91",
+        #       "port":27017,
+        #       "username": "mongo-admin",
+        #       "password": "i24-data-access",
+        #       "database_name": "trajectories",      
+        #       }
+        
+        
+        # prd   = DBClient(**db_param,collection_name = collection)
+        # preds = list(prd.read_query(None))
+        def WGS84_to_TN(points):
+            """
+            Converts GPS coordiantes (WGS64 reference) to tennessee state plane coordinates (EPSG 2274).
+            Transform is expected to be accurate within ~2 feet
+            
+            points array or tensor of size [n_pts,2]
+            returns out - array or tensor of size [n_pts,2]
+            """
+            
+            wgs84=pyproj.CRS("EPSG:4326")
+            tnstate=pyproj.CRS("epsg:2274")
+            out = pyproj.transform(wgs84,tnstate, points[:,0],points[:,1])
+            out = np.array(out).transpose(1,0)
+            
+            if type(points) == torch.Tensor:
+                out = torch.from_numpy(out)
+                
+            return out
+        
+        start_ts = 1668600000
+        end_ts = start_ts + 60*60*4
+        gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
+        feet_per_meter = 3.28084
+        y_valid = [-150,150]
+        x_valid = [0,23000]
+        ms_cutoff =  1000000000000
+
+
+        # 2. Load raw GPS data and assemble into dict with one key per object
+        # each entry will be array of time, array of x, array of y, array of acc, vehID
+        vehicles = {}
+
+        # TODO - get data from file
+        dataframe = pd.read_csv(gps_data_file,delimiter = "\t")
+
+        ts   = dataframe["systime"].tolist()
+        ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
+        lat  = dataframe["latitude"].tolist()
+        long = dataframe["longitude"].tolist()
+        vel  = dataframe["velocity"].tolist()
+        acc  = dataframe["acceleration"].tolist()
+        vehid   = dataframe["veh_id"].tolist()
+        acc_setting = dataframe["acc_speed_setting"].tolist()
+
+        ts = np.array(ts) #- (6*60*60) # convert from ms to s, then do UTC to CST offset
+        lat = np.array(lat)
+        long = np.array(long)
+        vel = np.array(vel) * feet_per_meter
+        acc = np.array(acc) * feet_per_meter
+        vehid = np.array(vehid)
+        # stack_data
+        data = np.stack([ts,lat,long,vel,acc,acc_setting,vehid]).transpose(1,0)
+
+        # sort by timestamp
+        data = data[data[:,0].argsort(),:]
+
+        # get unique vehids
+        ids = np.unique(data[:,6])
+
+        # assemble into dictionary
+        vehicles = dict([(id,[]) for id in ids])
+        for row in data:
+            if row[0] < start_ts or row[0] > end_ts:
+                continue
+            id = row[6]
+            vehicles[id].append(row)
+
+            
+        # lastly, stack each vehicle 
+        new_vehicles = {}
+        for key in vehicles.keys():
+            if len(vehicles[key]) == 0:
+                continue
+            data = np.stack(vehicles[key])
+            new_data = {
+                "ts":data[:,0],
+                "lat":data[:,1],
+                "long":data[:,2],
+                "vel":data[:,3],
+                "acc":data[:,4]
+                }
+            new_vehicles[key] = new_data
+
+
+        vehicles = new_vehicles
+
+        # Nissan Rogue 183″ L x 72″ W x 67″ H
+        l = 183/12
+        w = 72/12
+        h = 67/12
+
+        # 3. Convert data into roadway coordinates
+        trunc_vehicles = {}
+        for vehid in vehicles.keys():
+            
+            #print("Converting vehicle {}".format(vehid))
+            
+            data = vehicles[vehid]
+            vehid = int(vehid)
+            # get data as roadway coordinates
+            gps_pts  = torch.from_numpy(np.stack([data["lat"],data["long"]])).transpose(1,0)
+            deriv_data = torch.from_numpy(np.stack([data["vel"],data["acc"],data["ts"]])).transpose(1,0)
+            
+            state_pts = WGS84_to_TN(gps_pts)
+            state_pts = torch.cat((state_pts,torch.zeros(state_pts.shape[0],1)),dim = 1).unsqueeze(1)
+            roadway_pts = self.hg.space_to_state(state_pts)
+            
+            veh_counter = 0
+            cur_veh_data = [],[] # for xy and tva
+            for r_idx in range (len(roadway_pts)):
+                row = roadway_pts[r_idx]
+                deriv_row = deriv_data[r_idx]
+                
+                if row[0] > x_valid[0] and row[0] < x_valid[1] and row[1] > y_valid[0] and row[1] < y_valid[1]:
+                    cur_veh_data[0].append(row)
+                    cur_veh_data[1].append(deriv_row)
+                
+                else:
+                    # break off trajectory chunk
+                    if len(cur_veh_data[0]) > 30:
+                        this_road = torch.stack(cur_veh_data[0])
+                        this_deriv = torch.stack(cur_veh_data[1])
+                        
+                        sub_key = "{}_{}".format(vehid,veh_counter)
+                        trunc_vehicles[sub_key] =   {
+                         "x": this_road[:,0],
+                         "y": this_road[:,1],
+                         "vel":this_deriv[:,0],
+                         "acc":this_deriv[:,1],
+                         "ts" :this_deriv[:,2],
+                         "start":this_deriv[0,2],
+                         "end":this_deriv[-1,2],
+                         "id" :vehid,
+                         "run":veh_counter,
+                         "l":l,
+                         "w":w,
+                         "h":h
+                         }
+                        
+                        veh_counter += 1
+                    cur_veh_data = [],[]
+                           
+                    
+        self.gps = trunc_vehicles
 
     def quit(self):      
         self.cont = False
@@ -207,7 +389,7 @@ class Annotator():
         else:
             print("Cannot return to previous frame. First frame or buffer limit")
                         
-    def plot(self,extension_distance = 200):        
+    def plot(self):        
         plot_frames = []
         #ranges = self.ranges
         
@@ -245,27 +427,44 @@ class Annotator():
                self.hg.plot_state_boxes(frame,boxes,labels = ids,thickness = 1,name = [self.camera_names[i] for _ in boxes])
            
            
-           # #chg_data = list(self.port_data[self.frame_idx].values())
-           # #chg_data = list(filter(lambda x: x["camera"] == camera.name,chg_data))
            
-           # #ts_data = list(filter(lambda x: x["id"] == self.get_unused_id() - 1,ts_data))
-
-           # if False:
-           #      ts_data = [self.offset_box_y(copy.deepcopy(obj),reverse = True) for obj in ts_data]
-           # ids = [item["id"] for item in ts_data]
-           # if len(ts_data) > 0:
-           #     boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in ts_data])
-               
-           #     # convert into image space
-           #     cname = [camera.name for b in boxes]
-
-           #     im_boxes = self.hg.state_to_im(boxes,name = cname)
-                
-           #     # plot on frame
-           #     frame = self.hg.plot_state_boxes(frame,boxes,name = camera.name,color = (0,255,0),secondary_color = (0,255,0),thickness = 2,jitter_px = 0)
-           #     frame = self.hg.plot_state_boxes(frame,boxes,name = cname,color = (0,100,255),thickness = 2)
-           
-               
+           if True:
+               gps_boxes = []
+               gps_ids = []
+               frame_ts = self.b.ts[self.frame_idx][i]
+               for key in self.gps.keys():
+                   gpsob = self.gps[key]
+                   #print(gpsob["start"].item(),gpsob["end"].item())
+                   if gpsob["start"] < frame_ts and gpsob["end"] > frame_ts:
+                       
+                       # iterate through timestamps to find ts directly before and after current ts
+                       for t in range(1,len(gpsob["ts"])):
+                           if gpsob["ts"][t] > frame_ts:
+                               break
+                       
+                       x1 = gpsob["x"][t-1]
+                       x2 = gpsob["x"][t]
+                       y1 = gpsob["y"][t-1]
+                       y2 = gpsob["y"][t]
+                       t1 = gpsob["ts"][t-1]
+                       t2 = gpsob["ts"][t]
+                       f1 = (t2-frame_ts)/(t2-t1)
+                       f2 = (frame_ts-t1)/(t2-t1)
+                       
+                       x_interp =  x1*f1 + x2*f2
+                       y_interp =  y1*f1 + y2*f2
+                       
+                       l = gpsob["l"]
+                       w = gpsob["w"]
+                       h = gpsob["h"]
+                       
+                       gps_box = torch.tensor([x_interp,y_interp,l,w,h,torch.sign(y_interp)])
+                       gps_boxes.append(gps_box)
+                       gps_ids.append(key)
+              
+           if len(gps_boxes) > 0:
+               gps_boxes = torch.stack(gps_boxes)
+               self.hg.plot_state_boxes(frame,gps_boxes,labels = gps_ids,thickness = 2,name = [self.camera_names[i] for _ in gps_boxes],color = (0,200,0))     
            #     # plot labels
            #     if self.TEXT:
            #         times = [item["timestamp"] for item in ts_data]
@@ -275,68 +474,6 @@ class Annotator():
            #         directions = ["WB" if item == -1 else "EB" for item in directions]
            #         camera.frame = Data_Reader.plot_labels(None,frame,im_boxes,boxes,classes,ids,None,directions,times)
                    
-           # # TEMP, to be removed after port
-           # if False and len(chg_data) > 0:
-           #     boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in chg_data])
-               
-           #     # convert into image space
-           #     cname = [camera.name for b in boxes]
-           #     chgim_boxes = self.hg.state_to_im(boxes,name = cname)
-                
-           #     # plot on frame
-           #     frame = self.hg.plot_state_boxes(frame,boxes,name = cname,color = (0,0,255),thickness = 1)
-           
-            
-           
-           # if False and "c3" not in camera.name and "c4" not in camera.name: # plot splines
-           #     times = [item["timestamp"] for item in ts_data]
-           #     plot_spline_boxes = []
-           #     # get objects visible in adjacent cameras (2 in each direction)
-           #     ts_data2 = list(self.data[self.frame_idx].values())
-           #     if True:
-           #         ts_data2 = [self.offset_box_y(copy.deepcopy(obj),reverse = True) for obj in ts_data2]
-           #     else:
-           #         ts_data2 = [copy.deepcopy(obj) for obj in ts_data2]
-           #     for obj in ts_data2:
-           #         id = obj["id"]
-           #         if id in ids:
-           #             continue
-           #         x_spline,y_spline = self.splines[id]
-           #         if x_spline is None or y_spline is None or len(times) == 0:
-           #             continue
-           #         else:
-           #             obj["x"] = x_spline([times[0]])[0]
-           #             obj["y"] = y_spline([times[0]])[0]
-                       
-           #         if obj["x"] > ranges[camera.name][0] - extension_distance and obj["x"] < ranges[camera.name][1] + extension_distance: 
-           #                 plot_spline_boxes.append(obj)
-           #     if len(plot_spline_boxes) > 0:
-           #         boxes2 = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in plot_spline_boxes])
-           #         im_boxes2 = self.hg.state_to_im(boxes2,name = camera.name)
-                   
-           #         keep = (torch.max(im_boxes2[:,:,0],dim = 1)[0] < 1920).int() * (torch.min(im_boxes2[:,:,0],dim = 1)[0] > 0).int() * (torch.max(im_boxes2[:,:,1],dim = 1)[0] < 1080).int() * (torch.max(im_boxes2[:,:,0],dim = 1)[1] > 0).int()
-           #         boxes2 = boxes2[keep.nonzero().squeeze(1)]
-           #         if len(boxes2) > 0:
-           #             frame = self.hg.plot_state_boxes(frame,boxes2,name = camera.name,color = (255,190,0),secondary_color = (255,190,0),thickness = 1)
-
-
-
-               
-               # try:
-               #     ts_data = list(self.spline_data[self.frame_idx].values())
-               #     ts_data = list(filter(lambda x: x["camera"] == camera.name,ts_data))
-               #     if True:
-               #          ts_data = [self.offset_box_y(copy.deepcopy(obj),reverse = True) for obj in ts_data]
-               #     if len(ts_data) > 0:
-               #         boxes = torch.stack([torch.tensor([obj["x"],obj["y"],obj["l"],obj["w"],obj["h"],obj["direction"]]).float() for obj in ts_data])
-                       
-               #         # convert into image space
-               #         im_boxes = self.hg.state_to_im(boxes,name = camera.name)
-                        
-               #         # plot on frame
-               #         frame = self.hg.plot_state_boxes(frame,boxes,name = camera.name,color = (255,255,255),secondary_color = (255,255,255),thickness = 1)
-               # except:
-               #       pass
             
            # if self.LANES:
                 
@@ -382,18 +519,6 @@ class Annotator():
            #                      cv2.polylines(frame,[curve_im],False,color,th)
                    
                 
-                   
-           # print the estimated time_error for camera relative to first sequence
-           # error_label = "Estimated Frame Time: {}".format(frame_ts)
-           # text_size = 1.6
-           # frame = cv2.putText(frame, error_label, (20,30), cv2.FONT_HERSHEY_PLAIN,text_size, [1,1,1], 2)
-           # frame = cv2.putText(frame, error_label, (20,30), cv2.FONT_HERSHEY_PLAIN,text_size, [0,0,0], 1)
-           # error_label = "Estimated Frame Bias: {}".format(cam_ts_bias)
-           # text_size = 1.6
-           # frame = cv2.putText(frame, error_label, (20,60), cv2.FONT_HERSHEY_PLAIN,text_size, [1,1,1], 2)
-           # frame = cv2.putText(frame, error_label, (20,60), cv2.FONT_HERSHEY_PLAIN,text_size, [0,0,0], 1)
-           
-           
            
            # if self.MASK:
            #     mask_im = self.mask_ims[camera.name]/255
@@ -402,7 +527,7 @@ class Annotator():
            
            if True:
                font =  cv2.FONT_HERSHEY_SIMPLEX
-               header_text = "{} frame {}".format(self.camera_names[i],self.frame_idx)
+               header_text = "{} frame {}: {:.3f}s".format(self.camera_names[i],self.frame_idx,self.b.ts[self.frame_idx][i])
                frame = cv2.putText(frame,header_text,(30,30),font,1,(255,255,255),1)
                
            plot_frames.append(frame)
