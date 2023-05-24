@@ -79,12 +79,13 @@ class Annotator:
         self.toggle_auto = True
         self.AUTO = True
 
-        self.buffer(10)
+        self.buffer(100)
         
         
         #### get homography
         self.hg = I24_RCS(save_file = hg_path,downsample = 2)
         self.hg_path = hg_path
+        self.extents = self.get_hg_extents()
     
         #### Initialize data structures for storing annotations, and optionally reload
         
@@ -148,7 +149,29 @@ class Annotator:
                 pickle.dump(self.gps,f)
     
         print("Loaded annotator")
-    
+   
+   
+    def get_hg_extents(self):
+        # 2. convert all extent points into state coordinates
+        data = {}
+        for key in self.hg.correspondence.keys():
+            pts = (torch.from_numpy(self.hg.correspondence[key]["corr_pts"])/2.0).unsqueeze(1)
+            data[key] = self.hg.im_to_state(pts,name = [key for _ in range(len(pts))], heights = 0, refine_heights = False)
+            
+        # 3. Find min enclosing extents for each camera
+        
+        extents = {}
+        for key in data.keys():
+            key_data = data[key]
+            minx = torch.min(key_data[:,0]).item()
+            maxx = torch.max(key_data[:,0]).item()
+            miny = torch.min(key_data[:,1]).item()
+            maxy = torch.max(key_data[:,1]).item()
+            
+            extents[key] = [minx,maxx,miny,maxy]
+            
+        return extents
+   
     def load_gps_data(self):
         """
         Load GPS file and convert to rcs. 
@@ -611,7 +634,66 @@ class Annotator:
     def associate(self,id,gps_id):
         self.objects[id]["gps_id"] = gps_id
         
+        
+    def smart_advance(self):
+        """ Advance to next camera if there is an annotation for this camera/frame pair, else just advance a frame"""
+        
+        # get active (copied) object
+        if self.copied_box is None:
+            return
+      
+        obj_id = self.copied_box[0]
+        
+        
+        # if no annotation yet, just advance the frame
+        if obj_id not in self.data[self.frame_idx].keys():
+            self.next()
+            self.plot()
+            return
             
+        
+        # get associated GPS object
+        gps_id = self.objects[obj_id]["gps_id"]
+        if gps_id is None:
+            return
+        
+        # get next camera
+        if self.active_cam < len(self.camera_names) -1:
+            self.toggle_cams(1)
+            cam = self.camera_names[self.active_cam]
+            direction = torch.sign(self.copied_box[1][1])
+            directionstr = "EB" if direction == 1 else "WB"
+            
+        else:
+            self.active_cam = 0
+            return
+        
+        # get active camera's center of FOV (roughly) from hg
+        if direction == 1: 
+            min_x = self.extents["{}_{}".format(cam,directionstr)][0]
+        else:
+            min_x = self.extents["{}_{}".format(cam,directionstr)][1]
+        
+        
+        # find the first frame in which GPS object is past the appropriate time to advance s.t. the GPS object is in the camera's FOV
+        for tidx in range(len(self.gps[gps_id]["x"])):
+            if direction == 1 and self.gps[gps_id]["x"][tidx] > min_x:
+                break
+            if direction == -1 and self.gps[gps_id]["x"][tidx] < min_x:
+                break
+            
+        next_time = self.gps[gps_id]["ts"][tidx]
+        
+        
+        # advance to that frame (or give warning if not buffered)
+        for f_idx in range(len(self.b.ts)):
+            if self.b.ts[f_idx][self.active_cam] > next_time:
+                break
+        stride = f_idx - self.frame_idx
+        self.next(stride = stride)
+        
+        
+        
     def add(self,obj_idx,location):
         
         xy = self.box_to_state(location)[0,:].data.numpy()
@@ -2514,6 +2596,10 @@ class Annotator:
 
            elif key == ord("."):
                 self.sink_active_object()
+                
+           elif key == ord(" "):
+               self.smart_advance()
+               self.plot()
                
            # toggle commands
            elif key == ord("a"):
