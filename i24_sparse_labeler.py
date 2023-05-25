@@ -68,7 +68,7 @@ class Annotator:
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
-        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 1800)
+        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 600)
         
         
         # frame indexed data array since we'll plot by frames
@@ -79,7 +79,7 @@ class Annotator:
         self.toggle_auto = True
         self.AUTO = True
 
-        self.buffer(100)
+        self.buffer(600)
         
         
         #### get homography
@@ -136,7 +136,7 @@ class Annotator:
         self.plot_idx = 0        
         self.active_cam = 0
     
-    
+        
     
         # load GPS data
         gps_data_cache = "./data/GPS2.cpkl"
@@ -148,6 +148,7 @@ class Annotator:
             with open(gps_data_cache,"wb") as f:
                 pickle.dump(self.gps,f)
     
+        self.find_furthest_gps(direction = -1)
         print("Loaded annotator")
    
    
@@ -630,9 +631,72 @@ class Annotator:
         
     #     os.system("/usr/bin/ffmpeg -i {} -vcodec libx264 {}".format(temp_name,f_name))
         
+    def find_furthest_gps(self,direction = -1):
+        """
+        Finds the GPS vehicle that is furthest along on the roadway (depending on direction of travel)
+        Then finds the cameras bookending that object's position.
+        Excludes all objects associated with a labeled object that has a sink camera
+        """
+        
+        #1. return to first frame in buffer
+        stride = min(self.frame_idx, self.b.buffer_limit)
+        self.prev(stride = stride)
+        
+        #2. sample all object positions that are currently active; filter by direction
+        gps_ids = []
+        gps_pos = []
+        frame_ts = self.b.ts[self.frame_idx][0] # just use first frame's timestamp
+        for key in self.gps.keys():
+            gpsob = self.gps[key]
+            #print(gpsob["start"].item(),gpsob["end"].item())
+            if gpsob["start"] < frame_ts and gpsob["end"] > frame_ts and torch.sign(gpsob["y"][0]) == direction:
+                
+                # iterate through timestamps to find ts directly before and after current ts
+                for t in range(1,len(gpsob["ts"])):
+                    if gpsob["ts"][t] > frame_ts:
+                        break
+                
+                gps_pos.append(gpsob["x"][t])
+                gps_ids.append(key)
+    
+        #3. filter by associated sink objects
+        furthest_id = None
+        furthest_pos = -np.inf
+        
+        for gidx,gpsid in enumerate(gps_ids):
+            valid = True
+            for obj in self.objects:
+                if self.objects[obj]["gps_id"] == gpsid:
+                    valid = False
+                    break
+            if valid:
+                if gps_pos[gidx]*direction > furthest_pos:
+                    furthest_pos = gps_pos[gidx]*direction
+                    furthest_id = gpsid
+        
+        #4. after selecting object, find relevant camera for current position
+        directionstr = "EB" if direction == 1 else "WB"
+        furthest_pos *= direction # make positive again
+        for cidx in range(len(self.camera_names)):
+            cam = self.camera_names[int(-1*direction*cidx)] # need to index in reverse order for EB 
+            
+            if direction == 1: 
+                min_x = self.extents["{}_{}".format(cam,directionstr)][1]
+                if furthest_pos < min_x: break
+            else:
+                min_x = self.extents["{}_{}".format(cam,directionstr)][0]
+                if furthest_pos > min_x: break
+        
+        #5. advance
+        self.active_cam = cidx
+        print("Next furthest gps vehicle is {}, which will be visible in {} or {}".format(furthest_id,self.camera_names[self.active_cam],self.camera_names[self.active_cam+1]))
         
     def associate(self,id,gps_id):
-        self.objects[id]["gps_id"] = gps_id
+        try:
+            self.objects[id]["gps_id"] = gps_id
+            self.active_command == "COPY PASTE"
+        except:
+            pass
         
         
     def smart_advance(self):
@@ -640,6 +704,8 @@ class Annotator:
         
         # get active (copied) object
         if self.copied_box is None:
+            self.next()
+            self.plot()
             return
       
         obj_id = self.copied_box[0]
@@ -668,7 +734,7 @@ class Annotator:
             self.active_cam = 0
             return
         
-        # get active camera's center of FOV (roughly) from hg
+        # get active camera's leading edge from hg
         if direction == 1: 
             min_x = self.extents["{}_{}".format(cam,directionstr)][0]
         else:
@@ -716,8 +782,10 @@ class Annotator:
         
         self.objects[obj_idx] = obj
         self.data[self.frame_idx][obj_idx] = datum
-
-
+        
+        self.copied_box = None
+        self.copy_paste(location,obj_idx = obj_idx)
+        self.active_command = "COPY PASTE"
     
     def box_to_state(self,point,direction = False):
         """
@@ -973,9 +1041,10 @@ class Annotator:
              self.objects[obj_idx][relevant_key] = relevant_change
              
     
-    def copy_paste(self,point):     
+    def copy_paste(self,point,obj_idx = None):     
         if self.copied_box is None:
-            obj_idx = self.find_box(point)
+            if obj_idx is None:
+                obj_idx = self.find_box(point)
             
             if obj_idx is None:
                 return
@@ -1112,12 +1181,14 @@ class Annotator:
             if obj_id in self.data[fidx].keys():
                 count += 1
                 
-        # get number of cameras between source and sink
         
         source_idx = -1
         sink_idx = -1
         source = self.objects[obj_id]["source"]
         sink = self.objects[obj_id]["sink"]
+        print("Assigned sink camera {} to object {}".format(sink,obj_id))
+
+        # get number of cameras between source and sink
         for i in range(len(self.camera_names)):
             if self.camera_names[i] == source:
                 source_idx = i
@@ -1127,12 +1198,16 @@ class Annotator:
         probable_count = np.abs(sink_idx - source_idx) + 1
         self.objects[obj_id]["complete"] = 1
         
-        if probable_count != count:
+        if probable_count > count:
             print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
             self.objects[obj_id]["complete"] = 0.5
+            
+        # advance to next object
+        self.find_furthest_gps()
+        self.save()
      
     def recount_objects(self):
-        for obj_id in range(self.next_object_id):
+        for obj_id in self.objects.keys():
 
             source_idx = -1
             sink_idx = -1
@@ -2596,6 +2671,7 @@ class Annotator:
 
            elif key == ord("."):
                 self.sink_active_object()
+                self.plot()
                 
            elif key == ord(" "):
                self.smart_advance()
@@ -2625,7 +2701,7 @@ class Annotator:
                
           
            elif self.active_command == "COPY PASTE" and self.copied_box:
-               nudge = 0.5
+               nudge = 0.25
                xsign = torch.sign(self.copied_box[1][1])
                if key == ord("1"):
                    self.shift(self.copied_box[0],None,dx = -nudge*xsign)
