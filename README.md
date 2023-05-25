@@ -15,5 +15,5 @@
 - [X] Add GPS box data
 - [X] Associate objects with GPS objects
 - [X] Automatically advance camera and frame after selecting a box based on next GPS location
-- [ ] Add some method for making sure we don't miss any GPS objects currently in the pipeline
+- [X] Add some method for making sure we don't miss any GPS objects currently in the pipeline
 - [ ] Make it easy to add 2 annotations per object per frame
