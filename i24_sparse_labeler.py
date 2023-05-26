@@ -63,7 +63,9 @@ class Annotator:
             c = int(camera.split("C")[-1].split(".")[0])
             shortname = camera.split(".")[0]
             
-            if c == 4 and p%1 == 0 and ".h264" in camera and p< 41:
+            if c == 4 and p%1 == 0 and ".h264" in camera and p< 41 and p > 2 :
+#            if c == 4 and p in [22,24,26,28]:
+
                 include_cameras.append(shortname)
            
         self.camera_names = include_cameras
@@ -214,7 +216,9 @@ class Annotator:
         
         start_ts = 1668600000
         end_ts = start_ts + 60*60*4
-        gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
+        #gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
+        gps_data_file = "/home/derek/Data/CIRCLES_GPS/mvt_11_18_gps_vins.csv"
+
         feet_per_meter = 3.28084
         y_valid = [-150,150]
         x_valid = [0,23000]
@@ -226,7 +230,7 @@ class Annotator:
         vehicles = {}
 
         # TODO - get data from file
-        dataframe = pd.read_csv(gps_data_file,delimiter = "\t")
+        dataframe = pd.read_csv(gps_data_file,delimiter = ",")
 
         ts   = dataframe["systime"].tolist()
         ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
@@ -455,7 +459,7 @@ class Annotator:
            
            
            
-           if True:
+           if self.MASK:
                gps_boxes = []
                gps_ids = []
                frame_ts = self.b.ts[self.frame_idx][i]
@@ -489,9 +493,9 @@ class Annotator:
                        gps_boxes.append(gps_box)
                        gps_ids.append(key)
               
-           if len(gps_boxes) > 0:
-               gps_boxes = torch.stack(gps_boxes)
-               self.hg.plot_state_boxes(frame,gps_boxes,labels = gps_ids,thickness = 2,name = [self.camera_names[i] for _ in gps_boxes],color = (0,200,0))     
+               if len(gps_boxes) > 0:
+                   gps_boxes = torch.stack(gps_boxes)
+                   self.hg.plot_state_boxes(frame,gps_boxes,labels = gps_ids,thickness = 2,name = [self.camera_names[i] for _ in gps_boxes],color = (0,200,0))     
            #     # plot labels
            #     if self.TEXT:
            #         times = [item["timestamp"] for item in ts_data]
@@ -1235,6 +1239,8 @@ class Annotator:
                 print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
                 self.objects[obj_id]["complete"] = 0.5
                 
+    def hop(self):
+        self.next(stride = 3)
             
     def delete(self,obj_idx, n_frames = -1):
         """
@@ -2618,6 +2624,10 @@ class Annotator:
            if key == ord('9'):
                 self.next()
                 self.plot()
+           elif key == ord("b"):
+               self.hop()
+               self.plot()
+                
            elif key == ord('8'):
                 self.prev()  
                 self.plot()
