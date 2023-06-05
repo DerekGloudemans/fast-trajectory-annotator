@@ -63,14 +63,14 @@ class Annotator:
             c = int(camera.split("C")[-1].split(".")[0])
             shortname = camera.split(".")[0]
             
-            if (c == 4) and p%2 == 0 and ".h264" in camera and p< 41 and p > 2 :
+            if (((c == 4) and p%1 == 0  and p< 41 and p > 2  and p != 24) or (c == 3 and p == 24)) and ".h264" in camera:
 #            if c == 4 and p in [22,24,26,28]:
 
                 include_cameras.append(shortname)
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
-        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 300)
+        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 200)
         
         
         # frame indexed data array since we'll plot by frames
@@ -84,7 +84,7 @@ class Annotator:
         # dictionary with dimensions, source camera, number of annotations, current lane, and sink camera for each object
         self.objects = {} 
 
-        self.buffer(100)
+        self.buffer(400)
         
         
         #### get homography
@@ -106,10 +106,7 @@ class Annotator:
         self.save_file = save_file
         
        
-        self.next_object_id = 0
-        for id in self.objects.keys():
-            if id > self.next_object_id:
-                self.next_object_id = id + 1
+        self.next_object_id = self.get_unused_id()
 
                 
         #### Initialize a bunch of other stuff for tool management
@@ -139,14 +136,14 @@ class Annotator:
         
         self.plot_idx = 0        
         self.active_cam = 0
-    
+        self.active_direction = -1
         
         self.frame_gaps = np.zeros(len(self.camera_names))
         self.prev_cam_label_frame = 0
     
     
         # load GPS data
-        gps_data_cache = "./data/GPS6.cpkl"
+        gps_data_cache = "./data/GPS_10hz.cpkl"
         try:
             with open(gps_data_cache,"rb") as f:
                 self.gps = pickle.load(f)
@@ -158,6 +155,12 @@ class Annotator:
         self.find_furthest_gps(direction = -1)
         print("Loaded annotator")
    
+    
+    def get_unused_id(self):
+       i = 0
+       while i in self.objects.keys():
+           i += 1
+       return i
    
     def get_hg_extents(self):
         # 2. convert all extent points into state coordinates
@@ -814,8 +817,74 @@ class Annotator:
     #     out.release()
         
     #     os.system("/usr/bin/ffmpeg -i {} -vcodec libx264 {}".format(temp_name,f_name))
+   
+    
+    def find_object(self,obj_id,direction = -1):
+        last_frame_idx = 0
+        last_pos = 0
+        for i in range(len(self.b.frames)):
+            if obj_id in self.data[i].keys():
+                last_frame_idx = i
+                last_pos = self.data[i][obj_id][0]
+                
+        if last_frame_idx < (len(self.b.frames) - self.b.buffer_limit): # in this case the object was last visible in a frame before the buffer starts
+            return
+                
+        # if len(self.b.frames) - last_frame_idx <= 20: # in this case the object has probably been labeled as far as it can be
+        #     return
+                
+       
+            
+    
+        #4. after selecting object, find relevant camera for current position
+        directionstr = "EB" if direction == 1 else "WB"
+        last_pos *= direction # make positive again
+        for cidx in range(len(self.camera_names)):
+            cam = self.camera_names[int(-1*direction*cidx)] # need to index in reverse order for EB 
+            
+            if direction == 1: 
+                min_x = self.extents["{}_{}".format(cam,directionstr)][1]
+                if last_pos < min_x: break
+            else:
+                min_x = self.extents["{}_{}".format(cam,directionstr)][0]
+                if last_pos > min_x: break
         
-    def find_furthest_gps(self,direction = -1):
+        #5. advance
+        self.active_cam = min(cidx,len(self.camera_names)-2)
+        self.frame_idx = last_frame_idx
+        gid = self.objects[obj_id]["gps_id"]
+        print("Found {} (gps {}),  in camera {}, frame {}".format(obj_id,gid,self.camera_names[self.active_cam],last_frame_idx))
+        self.plot()
+        
+        
+    def find_unfinished_obj(self,direction = -1):
+        """
+        Goes through object dict, finds first object without a sink camera, and finds last camera and frame for said object
+        """
+        
+        obj_id = None
+        for key in self.objects.keys():
+            if self.objects[key]["sink"] is None:
+                obj_id = key
+            
+                if obj_id is not None:
+                    self.find_object(obj_id)
+                    break
+       
+
+    def return_to_first_frame(self):
+        #1. return to first frame in buffer
+        for i in range(0,len(self.b.frames)):
+            if len(self.b.frames[i]) > 0:
+                break
+            
+        self.frame_idx = i
+        self.label_buffer = copy.deepcopy(self.data),copy.deepcopy(self.objects)
+        self.AUTO = True
+
+        
+        
+    def find_furthest_gps(self,direction = -1,SINK = False):
         """
         Finds the GPS vehicle that is furthest along on the roadway (depending on direction of travel)
         Then finds the cameras bookending that object's position.
@@ -826,37 +895,49 @@ class Annotator:
         stride = min(self.frame_idx, self.b.buffer_limit)
         self.prev(stride = stride)
         
-        #2. sample all object positions that are currently active; filter by direction
-        gps_ids = []
-        gps_pos = []
-        frame_ts = self.b.ts[self.frame_idx][0] # just use first frame's timestamp
-        for key in self.gps.keys():
-            gpsob = self.gps[key]
-            #print(gpsob["start"].item(),gpsob["end"].item())
-            if gpsob["start"] < frame_ts and gpsob["end"] > frame_ts and torch.sign(gpsob["y"][0]) == direction:
-                
-                # iterate through timestamps to find ts directly before and after current ts
-                for t in range(1,len(gpsob["ts"])):
-                    if gpsob["ts"][t] > frame_ts:
-                        break
-                
-                gps_pos.append(gpsob["x"][t])
-                gps_ids.append(key)
-    
-        #3. filter by associated sink objects
-        furthest_id = None
-        furthest_pos = -np.inf
+        while True: # iteratively step forward until there's an object
+            
+            #2. sample all object positions that are currently active; filter by direction
+            gps_ids = []
+            gps_pos = []
+            frame_ts = self.b.ts[self.frame_idx][0] # just use first frame's timestamp
+            for key in self.gps.keys():
+                gpsob = self.gps[key]
+                #print(gpsob["start"].item(),gpsob["end"].item())
+                if gpsob["start"] < frame_ts and gpsob["end"] > frame_ts and torch.sign(gpsob["y"][0]) == direction:
+                    
+                    # iterate through timestamps to find ts directly before and after current ts
+                    for t in range(1,len(gpsob["ts"])):
+                        if gpsob["ts"][t] > frame_ts:
+                            break
+                    
+                    gps_pos.append(gpsob["x"][t])
+                    gps_ids.append(key)
         
-        for gidx,gpsid in enumerate(gps_ids):
-            valid = True
-            for obj in self.objects:
-                if self.objects[obj]["gps_id"] == gpsid:
-                    valid = False
-                    break
-            if valid:
-                if gps_pos[gidx]*direction > furthest_pos:
-                    furthest_pos = gps_pos[gidx]*direction
-                    furthest_id = gpsid
+            #3. filter by associated sink objects
+            furthest_id = None
+            furthest_pos = -np.inf
+            
+            for gidx,gpsid in enumerate(gps_ids):
+                valid = True
+                for obj in self.objects:
+                    if self.objects[obj]["gps_id"] == gpsid:
+                        if not SINK: 
+                            valid = False
+                            break
+                        else:
+                            if self.objects[obj]["sink"] is not None:
+                                valid = False
+                                break
+                if valid:
+                    if gps_pos[gidx]*direction > furthest_pos:
+                        furthest_pos = gps_pos[gidx]*direction
+                        furthest_id = gpsid
+            
+            if furthest_id is None:
+                self.next(stride = 10)
+            else:
+                break
         
         #4. after selecting object, find relevant camera for current position
         directionstr = "EB" if direction == 1 else "WB"
@@ -874,55 +955,62 @@ class Annotator:
         #5. advance
         self.active_cam = cidx
         print("Next furthest gps vehicle is {}, which will be visible in {} or {}".format(furthest_id,self.camera_names[self.active_cam],self.camera_names[self.active_cam+1]))
+        self.smart_advance(gps_id = furthest_id)
+        self.plot()
         
     def associate(self,id,gps_id):
         try:
             self.objects[id]["gps_id"] = gps_id
-            self.active_command == "COPY PASTE"
+            self.active_command = "COPY PASTE"
         except:
             pass
         
         
-    def smart_advance(self):
+    def smart_advance(self,gps_id = None):
         """ Advance to next camera if there is an annotation for this camera/frame pair, else just advance a frame"""
         
-        # get active (copied) object
-        if self.copied_box is None:
-            self.next()
-            self.plot()
-            return
-      
-        obj_id = self.copied_box[0]
-        
-        
-        # if no annotation yet, just advance the frame
-        if obj_id not in self.data[self.frame_idx].keys():
-            self.next()
-            self.plot()
-            return
+        if gps_id is None:
+            # get active (copied) object
+            if self.copied_box is None:
+                self.next()
+                self.plot()
+                return
+          
+            obj_id = self.copied_box[0]
             
+            
+            # if no annotation yet, just advance the frame
+            if obj_id not in self.data[self.frame_idx].keys():
+                self.next()
+                self.plot()
+                return
+                
+            
+            # get associated GPS object
+            gps_id = self.objects[obj_id]["gps_id"]
+            
+            
+            # get next camera
+            if self.active_cam < len(self.camera_names) -1:
+                self.toggle_cams(1)
+                cam = self.camera_names[self.active_cam]
+                direction = torch.sign(self.copied_box[1][1])
+                directionstr = "EB" if direction == 1 else "WB"
+                
+            else:
+                #self.active_cam = 0
+                return
+            
+            if gps_id is None: # for objects that don't have a tied GPS
+                # advance according to self.frame_gaps for active cam
+                self.next(stride = int(self.frame_gaps[self.active_cam]))
+                return
         
-        # get associated GPS object
-        gps_id = self.objects[obj_id]["gps_id"]
-        
-        
-        # get next camera
-        if self.active_cam < len(self.camera_names) -1:
-            self.toggle_cams(1)
+        else: # use dummy direction
             cam = self.camera_names[self.active_cam]
-            direction = torch.sign(self.copied_box[1][1])
+            direction = self.active_direction
             directionstr = "EB" if direction == 1 else "WB"
             
-        else:
-            #self.active_cam = 0
-            return
-        
-        if gps_id is None: # for objects that don't have a tied GPS
-            # advance according to self.frame_gaps for active cam
-            self.next(stride = int(self.frame_gaps[self.active_cam]))
-            return
-        
-        
         # get active camera's leading edge from hg
         if direction == 1: 
             min_x = self.extents["{}_{}".format(cam,directionstr)][0]
@@ -951,6 +1039,7 @@ class Annotator:
         
     def add(self,obj_idx,location):
         
+        
         xy = self.box_to_state(location)[0,:].data.numpy()
         
         # create new object
@@ -975,6 +1064,8 @@ class Annotator:
         self.copied_box = None
         self.copy_paste(location,obj_idx = obj_idx)
         self.active_command = "COPY PASTE"
+        
+        
     
     def box_to_state(self,point,direction = False):
         """
@@ -1366,66 +1457,77 @@ class Annotator:
         self.objects[obj_id]["sink"] = self.clicked_camera
         self.copied_box = None
         
-        # count number of annotations for this object to ensure there are an appropriate number
-        
-        count = 0
-        for fidx in range(len(self.data)):
-            if obj_id in self.data[fidx].keys():
-                count += 1
-                
-        
-        source_idx = -1
-        sink_idx = -1
-        source = self.objects[obj_id]["source"]
-        sink = self.objects[obj_id]["sink"]
-        print("Assigned sink camera {} to object {}".format(sink,obj_id))
-
-        # get number of cameras between source and sink
-        for i in range(len(self.camera_names)):
-            if self.camera_names[i] == source:
-                source_idx = i
-            elif self.camera_names[i] == sink:
-                sink_idx = i
-                
-        probable_count = np.abs(sink_idx - source_idx) + 1
-        self.objects[obj_id]["complete"] = 1
-        
-        if probable_count > count:
-            print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
-            self.objects[obj_id]["complete"] = 0.5
+        self.recount_objects(f1 = len(self.b.frames))
             
         # advance to next object
         self.find_furthest_gps()
         self.save()
      
-    def recount_objects(self):
+    def recount_objects(self,f0 = 0,f1 = 1200,direction = "WB",tolerance = 20):
         for obj_id in self.objects.keys():
 
             source_idx = -1
             sink_idx = -1
             source = self.objects[obj_id]["source"]
             sink = self.objects[obj_id]["sink"]
-            if sink is None:
-                continue
+            if sink is not None:
         
-            count = 0
-            for fidx in range(len(self.data)):
-                if obj_id in self.data[fidx].keys():
-                    count += 1
+                all_x_pos = []
+                last_frame_idx = -1
+                for fidx in range(len(self.data)):
+                    if obj_id in self.data[fidx].keys():
+                        all_x_pos.append(self.data[fidx][obj_id][0])
+                        last_frame_idx = fidx
                     
-            # get number of cameras between source and sink
-            for i in range(len(self.camera_names)):
-                if self.camera_names[i] == source:
-                    source_idx = i
-                elif self.camera_names[i] == sink:
-                    sink_idx = i
+                # get number of cameras between source and sink
+                for i in range(len(self.camera_names)):
+                    if self.camera_names[i] == source:
+                        source_idx = i
+                    elif self.camera_names[i] == sink:
+                        sink_idx = i
+                
+                missing_cameras = []      
+                for cidx in range(source_idx,sink_idx+1):
+                    cam = self.camera_names[cidx]
+                    ANN = False
+                    ex = self.extents["{}_{}".format(cam,direction)][0:2]
                     
-            probable_count = np.abs(sink_idx - source_idx) + 1
-            self.objects[obj_id]["complete"] = 1
-            
-            if probable_count != count:
-                print("Warning: object {} is probably missing an annotation: {} annotations for {} cameras".format(obj_id,count,probable_count))
-                self.objects[obj_id]["complete"] = 0.5
+                    for pos in all_x_pos:
+                        if pos > (ex[0]-20) and pos < (ex[1] + 20):
+                            ANN = True
+                            break
+                    
+                    if not ANN:
+                        missing_cameras.append(cam)
+                
+                if len(missing_cameras) > 0:
+                    print("BAD : Object {} ({}): Has sink but is missing cameras: {}".format(obj_id,self.objects[obj_id]["gps_id"],missing_cameras))
+                else:
+                    print("GOOD: Object {} ({}): Has sink and no missing cameras".format(obj_id,self.objects[obj_id]["gps_id"]))
+                
+            elif sink is None:
+                all_x_pos = []
+                last_frame_idx = -1
+                for fidx in range(len(self.data)):
+                    if obj_id in self.data[fidx].keys():
+                        all_x_pos.append(self.data[fidx][obj_id][0])
+                        last_frame_idx = fidx
+                
+                if last_frame_idx - len(self.b.frames):
+                    print("OKAY: Object {} ({}): Last annotation is near buffer limit, so probably still active".format(obj_id,self.objects[obj_id]["gps_id"]))
+                    
+                else:
+                    print("BAD : Object {} ({}): Missing annotations, last annotation on frame {}".format(obj_id,self.objects[obj_id]["gps_id"],last_frame_idx))
+                
+                
+                
+        """
+        Rewrite for more info. Possible things that can happen
+        - Object has source and sink and there is at least one box visible in each camera between, inclusive (object is done)
+        - Same as above but object is missing at least one annotation
+        - Object does not have sink, but has been labeled in all consecutive cameras and was labeled within tolerance of end of range (i.e. is still active)
+        - Object does not have sink and has not been labeled up to within tolerance of end of range.
+        """
                 
     def hop(self):
         self.next(stride = 3)
@@ -1450,7 +1552,7 @@ class Annotator:
                 pass
             frame_idx += 1
         
-        if obj_idx in self.objects.keys():
+        if obj_idx in self.objects.keys() and n_frames == -1:
             del self.objects[obj_idx]
         
     def on_mouse(self,event, x, y, flags, params):
@@ -2741,16 +2843,21 @@ class Annotator:
                 # Add and delete objects
                 if self.active_command == "DELETE":
                     obj_idx = self.find_box(self.new) 
-                    self.delete(obj_idx)
+                    ki = self.keyboard_input()
+                    if len(ki) == 0:
+                        n_frames = -1
+                    else:
+                        n_frames = int(ki)
+                    self.delete(obj_idx,n_frames)
                     
                 elif self.active_command == "ADD":
                     # get obj_idx
-                    obj_idx = self.next_object_id
-                    self.next_object_id += 1
                     
                     
-                    self.add(obj_idx,self.new)
-                
+
+                    self.add(self.next_object_id,self.new)
+                    self.next_object_id = self.get_unused_id()
+                    
                 # Shift object
                 elif self.active_command == "SHIFT":
                     obj_idx = self.find_box(self.new)
@@ -2835,6 +2942,15 @@ class Annotator:
                
            elif key == ord("u"):
                self.undo()
+               
+           elif key == ord("f"):
+               self.find_furthest_gps()
+           elif key == ord("g"):
+                self.find_unfinished_obj()
+           elif key == ord("j"):
+                self.return_to_first_frame()
+                self.active_cam = 0
+                self.plot()
            # elif key == ord("-"):
            #      [self.prev() for i in range(self.stride)]
            #      self.plot()
@@ -2859,14 +2975,14 @@ class Annotator:
                self.MASK = not self.MASK
                self.plot()
                
-           elif key == ord("p"):
-               try:
-                   n = int(self.keyboard_input())
-               except:
-                   n = self.plot_idx
-               self.plot_trajectory(obj_idx = n)
-               self.plot_idx = n + 1
-
+           elif key == ord("s"):
+                try:
+                    obj_id = int(self.keyboard_input())
+                    self.find_object(obj_id)
+                except:
+                    pass
+                
+                
            elif key == ord("."):
                 self.sink_active_object()
                 self.plot()
@@ -2880,8 +2996,6 @@ class Annotator:
                self.active_command = "ADD"
            elif key == ord("r"):
                self.active_command = "DELETE"
-           elif key == ord("s"):
-               self.active_command = "SHIFT"
            elif key == ord("d"):
                self.active_command = "DIMENSION"
            elif key == ord("c"):
@@ -2967,7 +3081,8 @@ class Annotator:
 if __name__ == "__main__":
     directory = "/home/derek/Data/1hz"
     hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230530.cpkl"
-    save_file = "temp_test.cpkl"
+    save_file = "labeled_data.cpkl"
     ann = Annotator(directory,hg_file,save_file=save_file)  
+    ann.recount_objects()   
     ann.run()
     
