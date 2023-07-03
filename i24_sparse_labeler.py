@@ -49,8 +49,8 @@ class Annotator:
     def __init__(self,im_directory,hg_path,save_file = None):
         
         #### Initialize frame array
+        self.active_direction = -1
 
-        
         # get list of all cameras available
         camera_names = os.listdir(im_directory)
         camera_names.sort()
@@ -63,14 +63,18 @@ class Annotator:
             c = int(camera.split("C")[-1].split(".")[0])
             shortname = camera.split(".")[0]
             
-            if (((c == 4) and p%1 == 0  and p< 41 and p > 2  and p != 24) or (c == 3 and p == 24)) and ".h264" in camera:
-#            if c == 4 and p in [22,24,26,28]:
+            # For WB
+            if self.active_direction == -1:
+                if (((c == 4) and p%1 == 0  and p< 41 and p > 2  and p != 24) or (c == 3 and p == 24)) and ".h264" in camera:
+                    include_cameras.append(shortname)
 
-                include_cameras.append(shortname)
+            if self.active_direction == 1:
+                if (((c == 3) and p%1 == 0  and p< 41 and p > 7  and p != 24) or (c == 4 and p == 24)) and ".h264" in camera:
+                    include_cameras.append(shortname)
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
-        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 200)
+        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 680)
         
         
         # frame indexed data array since we'll plot by frames
@@ -84,7 +88,7 @@ class Annotator:
         # dictionary with dimensions, source camera, number of annotations, current lane, and sink camera for each object
         self.objects = {} 
 
-        self.buffer(400)
+        self.buffer(300)
         
         
         #### get homography
@@ -136,7 +140,6 @@ class Annotator:
         
         self.plot_idx = 0        
         self.active_cam = 0
-        self.active_direction = -1
         
         self.frame_gaps = np.zeros(len(self.camera_names))
         self.prev_cam_label_frame = 0
@@ -351,179 +354,179 @@ class Annotator:
                     
         self.gps = trunc_vehicles
 
-    def load_gps_data2(self):
-        """
-        Load GPS file and convert to rcs. 
+    # def load_gps_data2(self):
+    #     """
+    #     Load GPS file and convert to rcs. 
         
         
-        self.gps - dict of dicts, each with CIRCLES_id,dimensions, and array of x,y,time
-        """
+    #     self.gps - dict of dicts, each with CIRCLES_id,dimensions, and array of x,y,time
+    #     """
         
-        # collection = "637517698b5b68fc4fd40c77_CIRCLES_GPS"
-        # db_param = {
-        #       "host":"10.80.4.91",
-        #       "port":27017,
-        #       "username": "mongo-admin",
-        #       "password": "i24-data-access",
-        #       "database_name": "trajectories",      
-        #       }
+    #     # collection = "637517698b5b68fc4fd40c77_CIRCLES_GPS"
+    #     # db_param = {
+    #     #       "host":"10.80.4.91",
+    #     #       "port":27017,
+    #     #       "username": "mongo-admin",
+    #     #       "password": "i24-data-access",
+    #     #       "database_name": "trajectories",      
+    #     #       }
         
         
-        # prd   = DBClient(**db_param,collection_name = collection)
-        # preds = list(prd.read_query(None))
-        def WGS84_to_TN(points):
-            """
-            Converts GPS coordiantes (WGS64 reference) to tennessee state plane coordinates (EPSG 2274).
-            Transform is expected to be accurate within ~2 feet
+    #     # prd   = DBClient(**db_param,collection_name = collection)
+    #     # preds = list(prd.read_query(None))
+    #     def WGS84_to_TN(points):
+    #         """
+    #         Converts GPS coordiantes (WGS64 reference) to tennessee state plane coordinates (EPSG 2274).
+    #         Transform is expected to be accurate within ~2 feet
             
-            points array or tensor of size [n_pts,2]
-            returns out - array or tensor of size [n_pts,2]
-            """
+    #         points array or tensor of size [n_pts,2]
+    #         returns out - array or tensor of size [n_pts,2]
+    #         """
             
-            wgs84=pyproj.CRS("EPSG:4326")
-            tnstate=pyproj.CRS("epsg:2274")
-            out = pyproj.transform(wgs84,tnstate, points[:,0],points[:,1])
-            out = np.array(out).transpose(1,0)
+    #         wgs84=pyproj.CRS("EPSG:4326")
+    #         tnstate=pyproj.CRS("epsg:2274")
+    #         out = pyproj.transform(wgs84,tnstate, points[:,0],points[:,1])
+    #         out = np.array(out).transpose(1,0)
             
-            if type(points) == torch.Tensor:
-                out = torch.from_numpy(out)
+    #         if type(points) == torch.Tensor:
+    #             out = torch.from_numpy(out)
                 
-            return out
+    #         return out
         
-        start_ts = 1668600000
-        end_ts = start_ts + 60*60*4
-        #gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
-        gps_data_file = "/home/derek/Data/CIRCLES_GPS/gps_message_raw.csv"
+    #     start_ts = 1668600000
+    #     end_ts = start_ts + 60*60*4
+    #     #gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
+    #     gps_data_file = "/home/derek/Data/CIRCLES_GPS/gps_message_raw.csv"
 
-        feet_per_meter = 3.28084
-        y_valid = [-150,150]
-        x_valid = [0,23000]
-        ms_cutoff =  1000000000000
+    #     feet_per_meter = 3.28084
+    #     y_valid = [-150,150]
+    #     x_valid = [0,23000]
+    #     ms_cutoff =  1000000000000
 
 
-        # 2. Load raw GPS data and assemble into dict with one key per object
-        # each entry will be array of time, array of x, array of y, array of acc, vehID
-        vehicles = {}
+    #     # 2. Load raw GPS data and assemble into dict with one key per object
+    #     # each entry will be array of time, array of x, array of y, array of acc, vehID
+    #     vehicles = {}
 
-        # TODO - get data from file
-        dataframe = pd.read_csv(gps_data_file,delimiter = ",")
+    #     # TODO - get data from file
+    #     dataframe = pd.read_csv(gps_data_file,delimiter = ",")
 
-        ts   = dataframe["Systime"].tolist() 
-        ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
-        lat  = dataframe["Lat"].tolist()
-        long = dataframe["Long"].tolist()
-        vehid   = dataframe["vin"].tolist()
+    #     ts   = dataframe["Systime"].tolist() 
+    #     ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
+    #     lat  = dataframe["Lat"].tolist()
+    #     long = dataframe["Long"].tolist()
+    #     vehid   = dataframe["vin"].tolist()
 
-        ts = np.array(ts)# - (6*60*60) # convert from ms to s, then do UTC to CST offset
-        lat = np.array(lat)#.astype(float)
-        long = np.array(long)#.astype(float)
-        vehid = np.array(vehid)#.astype(int)
-        # stack_data
+    #     ts = np.array(ts)# - (6*60*60) # convert from ms to s, then do UTC to CST offset
+    #     lat = np.array(lat)#.astype(float)
+    #     long = np.array(long)#.astype(float)
+    #     vehid = np.array(vehid)#.astype(int)
+    #     # stack_data
         
-        data = []
-        for i in range(len(ts)):
-            if i% 100000 == 0: print(i, i/len(ts))
+    #     data = []
+    #     for i in range(len(ts)):
+    #         if i% 100000 == 0: print(i, i/len(ts))
             
-            try:
-                data.append(np.array([float(ts[i]), float(lat[i]),float(long[i]),float(vehid[i])]))
-            except: 
-                pass
+    #         try:
+    #             data.append(np.array([float(ts[i]), float(lat[i]),float(long[i]),float(vehid[i])]))
+    #         except: 
+    #             pass
             
-            #if i > 10000: break
-        data = np.stack(data)
+    #         #if i > 10000: break
+    #     data = np.stack(data)
         
 
-        # sort by timestamp
-        data = data[data[:,0].argsort(),:]
-        # get unique vehids
-        ids = np.unique(data[:,-1]).astype(int)
+    #     # sort by timestamp
+    #     data = data[data[:,0].argsort(),:]
+    #     # get unique vehids
+    #     ids = np.unique(data[:,-1]).astype(int)
 
-        # assemble into dictionary
-        vehicles = dict([(id,[]) for id in ids])
-        for row in data:
-            try:
-                if row[0] < start_ts or row[0] > end_ts:
-                    continue
-                #print("Got one")
-                id = int(row[-1])
-                vehicles[id].append(row)
-            except:
-                print("Bad Row")
-                continue
+    #     # assemble into dictionary
+    #     vehicles = dict([(id,[]) for id in ids])
+    #     for row in data:
+    #         try:
+    #             if row[0] < start_ts or row[0] > end_ts:
+    #                 continue
+    #             #print("Got one")
+    #             id = int(row[-1])
+    #             vehicles[id].append(row)
+    #         except:
+    #             print("Bad Row")
+    #             continue
 
             
-        # lastly, stack each vehicle 
-        new_vehicles = {}
-        for key in vehicles.keys():
-            if len(vehicles[key]) == 0:
-                continue
-            data = np.stack(vehicles[key])
-            new_data = {
-                "ts":data[:,0],
-                "lat":data[:,1],
-                "long":data[:,2]
-                }
-            new_vehicles[key] = new_data
+    #     # lastly, stack each vehicle 
+    #     new_vehicles = {}
+    #     for key in vehicles.keys():
+    #         if len(vehicles[key]) == 0:
+    #             continue
+    #         data = np.stack(vehicles[key])
+    #         new_data = {
+    #             "ts":data[:,0],
+    #             "lat":data[:,1],
+    #             "long":data[:,2]
+    #             }
+    #         new_vehicles[key] = new_data
 
 
-        vehicles = new_vehicles
+    #     vehicles = new_vehicles
 
-        # Nissan Rogue 183″ L x 72″ W x 67″ H
-        l = 183/12
-        w = 72/12
-        h = 67/12
+    #     # Nissan Rogue 183″ L x 72″ W x 67″ H
+    #     l = 183/12
+    #     w = 72/12
+    #     h = 67/12
 
-        # 3. Convert data into roadway coordinates
-        trunc_vehicles = {}
-        for vehid in vehicles.keys():
+    #     # 3. Convert data into roadway coordinates
+    #     trunc_vehicles = {}
+    #     for vehid in vehicles.keys():
             
-            #print("Converting vehicle {}".format(vehid))
+    #         #print("Converting vehicle {}".format(vehid))
             
-            data = vehicles[vehid]
-            vehid = int(vehid)
-            # get data as roadway coordinates
-            gps_pts  = torch.from_numpy(np.stack([data["lat"],data["long"]])).transpose(1,0)
-            deriv_data = torch.from_numpy(np.stack([data["ts"]])).transpose(1,0)
+    #         data = vehicles[vehid]
+    #         vehid = int(vehid)
+    #         # get data as roadway coordinates
+    #         gps_pts  = torch.from_numpy(np.stack([data["lat"],data["long"]])).transpose(1,0)
+    #         deriv_data = torch.from_numpy(np.stack([data["ts"]])).transpose(1,0)
             
-            state_pts = WGS84_to_TN(gps_pts)
-            state_pts = torch.cat((state_pts,torch.zeros(state_pts.shape[0],1)),dim = 1).unsqueeze(1)
-            roadway_pts = self.hg.space_to_state(state_pts)
+    #         state_pts = WGS84_to_TN(gps_pts)
+    #         state_pts = torch.cat((state_pts,torch.zeros(state_pts.shape[0],1)),dim = 1).unsqueeze(1)
+    #         roadway_pts = self.hg.space_to_state(state_pts)
             
-            veh_counter = 0
-            cur_veh_data = [],[] # for xy and tva
-            for r_idx in range (len(roadway_pts)):
-                row = roadway_pts[r_idx]
-                deriv_row = deriv_data[r_idx]
+    #         veh_counter = 0
+    #         cur_veh_data = [],[] # for xy and tva
+    #         for r_idx in range (len(roadway_pts)):
+    #             row = roadway_pts[r_idx]
+    #             deriv_row = deriv_data[r_idx]
                 
-                if row[0] > x_valid[0] and row[0] < x_valid[1] and row[1] > y_valid[0] and row[1] < y_valid[1]:
-                    cur_veh_data[0].append(row)
-                    cur_veh_data[1].append(deriv_row)
+    #             if row[0] > x_valid[0] and row[0] < x_valid[1] and row[1] > y_valid[0] and row[1] < y_valid[1]:
+    #                 cur_veh_data[0].append(row)
+    #                 cur_veh_data[1].append(deriv_row)
                 
-                else:
-                    # break off trajectory chunk
-                    if len(cur_veh_data[0]) > 30:
-                        this_road = torch.stack(cur_veh_data[0])
-                        this_deriv = torch.stack(cur_veh_data[1])
+    #             else:
+    #                 # break off trajectory chunk
+    #                 if len(cur_veh_data[0]) > 30:
+    #                     this_road = torch.stack(cur_veh_data[0])
+    #                     this_deriv = torch.stack(cur_veh_data[1])
                         
-                        sub_key = "{}_{}".format(vehid,veh_counter)
-                        trunc_vehicles[sub_key] =   {
-                         "x": this_road[:,0],
-                         "y": this_road[:,1],
-                         "ts" :this_deriv[:,0],
-                         "start":this_deriv[0,0],
-                         "end":this_deriv[-1,0],
-                         "id" :vehid,
-                         "run":veh_counter,
-                         "l":l,
-                         "w":w,
-                         "h":h,
-                         }
+    #                     sub_key = "{}_{}".format(vehid,veh_counter)
+    #                     trunc_vehicles[sub_key] =   {
+    #                      "x": this_road[:,0],
+    #                      "y": this_road[:,1],
+    #                      "ts" :this_deriv[:,0],
+    #                      "start":this_deriv[0,0],
+    #                      "end":this_deriv[-1,0],
+    #                      "id" :vehid,
+    #                      "run":veh_counter,
+    #                      "l":l,
+    #                      "w":w,
+    #                      "h":h,
+    #                      }
                         
-                        veh_counter += 1
-                    cur_veh_data = [],[]
+    #                     veh_counter += 1
+    #                 cur_veh_data = [],[]
                            
                     
-        self.gps = trunc_vehicles    
+        # self.gps = trunc_vehicles    
 
     def quit(self):      
         self.cont = False
@@ -820,15 +823,20 @@ class Annotator:
    
     
     def find_object(self,obj_id,direction = -1):
+        direction = self.active_direction
         last_frame_idx = 0
         last_pos = 0
+        first_frame_idx = None
         for i in range(len(self.b.frames)):
             if obj_id in self.data[i].keys():
                 last_frame_idx = i
+                if first_frame_idx is None:
+                    first_frame_idx = i
                 last_pos = self.data[i][obj_id][0]
                 
         if last_frame_idx < (len(self.b.frames) - self.b.buffer_limit): # in this case the object was last visible in a frame before the buffer starts
-            return
+            print("Object {} not visible in currently buffered frames".format(obj_id))
+            return False
                 
         # if len(self.b.frames) - last_frame_idx <= 20: # in this case the object has probably been labeled as far as it can be
         #     return
@@ -853,14 +861,15 @@ class Annotator:
         self.active_cam = min(cidx,len(self.camera_names)-2)
         self.frame_idx = last_frame_idx
         gid = self.objects[obj_id]["gps_id"]
-        print("Found {} (gps {}),  in camera {}, frame {}".format(obj_id,gid,self.camera_names[self.active_cam],last_frame_idx))
+        print("Found {} (gps {}),  in camera {}, frame {} (first frame is {})".format(obj_id,gid,self.camera_names[self.active_cam],last_frame_idx,first_frame_idx))
         self.plot()
+        return True
         
-        
-    def find_unfinished_obj(self,direction = -1):
+    def find_unfinished_obj(self,direction = -1,remove_last = 80):
         """
         Goes through object dict, finds first object without a sink camera, and finds last camera and frame for said object
         """
+        direction = self.active_direction
         
         obj_id = None
         for key in self.objects.keys():
@@ -868,7 +877,50 @@ class Annotator:
                 obj_id = key
             
                 if obj_id is not None:
-                    self.find_object(obj_id)
+                    last_frame_idx = 0
+                    last_pos = 0
+                    first_frame_idx = None
+                    for i in range(len(self.b.frames)):
+                        if obj_id in self.data[i].keys():
+                            last_frame_idx = i
+                            if first_frame_idx is None:
+                                first_frame_idx = i
+                            last_pos = self.data[i][obj_id][0]
+                            
+                    if last_frame_idx < (len(self.b.frames) - self.b.buffer_limit): # in this case the object was last visible in a frame before the buffer starts
+                        print("Object {} not visible in currently buffered frames".format(obj_id))
+                        continue                            
+                    elif last_frame_idx > len(self.b.frames) - remove_last:
+                        print("Object {} already labeled to frame {}, skipping...".format(obj_id,last_frame_idx))
+                        continue # remove objects that have been labeled all the way to the end already
+                            
+                   
+                        
+                
+                    directionstr = "EB" if direction == 1 else "WB"
+                    last_pos *= direction # make positive again
+                    for cidx in range(len(self.camera_names)):
+                        if direction == -1:
+                            cam = self.camera_names[cidx] # need to index in reverse order for EB 
+                        else:
+                            cam = self.camera_names[(len(self.camera_names) - 1 - cidx)]
+                        
+                        if direction == 1: 
+                            min_x = self.extents["{}_{}".format(cam,directionstr)][1]
+                            if last_pos < min_x: break
+                        else:
+                            min_x = self.extents["{}_{}".format(cam,directionstr)][0]
+                            if last_pos > min_x: break
+                    
+                    #5. advance
+                    if direction == 1: cidx = (len(self.camera_names) - 1 - cidx)
+                    
+                    #5. advance
+                    self.active_cam = min(cidx,len(self.camera_names)-2)
+                    self.frame_idx = last_frame_idx
+                    gid = self.objects[obj_id]["gps_id"]
+                    print("Found {} (gps {}),  in camera {}, frame {} (first frame is {})".format(obj_id,gid,self.camera_names[self.active_cam],last_frame_idx,first_frame_idx))
+                    self.plot()
                     break
        
 
@@ -892,8 +944,11 @@ class Annotator:
         """
         
         #1. return to first frame in buffer
-        stride = min(self.frame_idx, self.b.buffer_limit)
-        self.prev(stride = stride)
+        # stride = min(self.frame_idx, self.b.buffer_limit)
+        # self.prev(stride = stride)
+        direction = self.active_direction
+        self.return_to_first_frame()
+        
         
         while True: # iteratively step forward until there's an object
             
@@ -936,6 +991,9 @@ class Annotator:
             
             if furthest_id is None:
                 self.next(stride = 10)
+                if self.frame_idx >= len(self.b.frames) - 10:
+                    print("All gps vehicles visible in buffered frames have been labeled at least once")
+                    break
             else:
                 break
         
@@ -943,7 +1001,10 @@ class Annotator:
         directionstr = "EB" if direction == 1 else "WB"
         furthest_pos *= direction # make positive again
         for cidx in range(len(self.camera_names)):
-            cam = self.camera_names[int(-1*direction*cidx)] # need to index in reverse order for EB 
+            if direction == -1:
+                cam = self.camera_names[cidx] # need to index in reverse order for EB 
+            else:
+                cam = self.camera_names[(len(self.camera_names) - 1 - cidx)]
             
             if direction == 1: 
                 min_x = self.extents["{}_{}".format(cam,directionstr)][1]
@@ -953,7 +1014,8 @@ class Annotator:
                 if furthest_pos > min_x: break
         
         #5. advance
-        self.active_cam = cidx
+        if direction == 1: cidx = (len(self.camera_names) - 1 - cidx)
+        self.active_cam = min(cidx,len(self.camera_names)-2)
         print("Next furthest gps vehicle is {}, which will be visible in {} or {}".format(furthest_id,self.camera_names[self.active_cam],self.camera_names[self.active_cam+1]))
         self.smart_advance(gps_id = furthest_id)
         self.plot()
@@ -991,8 +1053,8 @@ class Annotator:
             
             
             # get next camera
-            if self.active_cam < len(self.camera_names) -1:
-                self.toggle_cams(1)
+            if self.active_cam < len(self.camera_names) -1 and self.active_cam > 0:
+                self.toggle_cams(-self.active_direction)
                 cam = self.camera_names[self.active_cam]
                 direction = torch.sign(self.copied_box[1][1])
                 directionstr = "EB" if direction == 1 else "WB"
@@ -1052,7 +1114,8 @@ class Annotator:
             "source":self.clicked_camera,
             "sink": None,
             "complete":0,
-            "gps_id":None
+            "gps_id":None,
+            "direction":self.active_direction
             }
         
         timestamp  = 0 # TODO
@@ -1463,8 +1526,10 @@ class Annotator:
         self.find_furthest_gps()
         self.save()
      
-    def recount_objects(self,f0 = 0,f1 = 1200,direction = "WB",tolerance = 20):
+    def recount_objects(self,f0 = 0,f1 = 1200,tolerance = 40):
         for obj_id in self.objects.keys():
+            if self.objects[obj_id]["direction"] != self.active_direction:
+                continue
 
             source_idx = -1
             sink_idx = -1
@@ -1490,7 +1555,8 @@ class Annotator:
                 for cidx in range(source_idx,sink_idx+1):
                     cam = self.camera_names[cidx]
                     ANN = False
-                    ex = self.extents["{}_{}".format(cam,direction)][0:2]
+                    dirstr = "EB" if self.active_direction == 1 else "WB"
+                    ex = self.extents["{}_{}".format(cam,dirstr)][0:2]
                     
                     for pos in all_x_pos:
                         if pos > (ex[0]-20) and pos < (ex[1] + 20):
@@ -1513,8 +1579,8 @@ class Annotator:
                         all_x_pos.append(self.data[fidx][obj_id][0])
                         last_frame_idx = fidx
                 
-                if last_frame_idx - len(self.b.frames):
-                    print("OKAY: Object {} ({}): Last annotation is near buffer limit, so probably still active".format(obj_id,self.objects[obj_id]["gps_id"]))
+                if f1 - last_frame_idx >= 20 :
+                    print("OKAY: Object {} ({}): Last annotation is near buffer limit (frame {}), so probably still active".format(obj_id,self.objects[obj_id]["gps_id"],last_frame_idx))
                     
                 else:
                     print("BAD : Object {} ({}): Missing annotations, last annotation on frame {}".format(obj_id,self.objects[obj_id]["gps_id"],last_frame_idx))
@@ -3013,16 +3079,16 @@ class Annotator:
                
           
            elif self.active_command == "COPY PASTE" and self.copied_box:
-               nudge = 0.25
+               nudge = 0.25 
                xsign = torch.sign(self.copied_box[1][1])
                if key == ord("1"):
-                   self.shift(self.copied_box[0],None,dx = -nudge*xsign)
+                   self.shift(self.copied_box[0],None,dx = -nudge*xsign* -self.active_direction)
                    self.plot()
                if key == ord("5"):
                    self.shift(self.copied_box[0],None,dy =  nudge)
                    self.plot()
                if key == ord("3"):
-                   self.shift(self.copied_box[0],None,dx =  nudge*xsign)
+                   self.shift(self.copied_box[0],None,dx =  nudge*xsign* -self.active_direction)
                    self.plot()
                if key == ord("2"):
                    self.shift(self.copied_box[0],None,dy = -nudge)
@@ -3083,6 +3149,6 @@ if __name__ == "__main__":
     hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230530.cpkl"
     save_file = "labeled_data.cpkl"
     ann = Annotator(directory,hg_file,save_file=save_file)  
-    ann.recount_objects()   
+    ann.recount_objects(f1 = 1500)   
     ann.run()
     
