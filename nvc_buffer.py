@@ -133,9 +133,16 @@ class GPUBackendFrameGetter:
         """
         
         
-        frame = self.queue.get(timeout = 20)
-        ts = frame[1] #/ 10e8
-        im = frame[0]
+        try:
+            frame = self.queue.get(timeout = 20)
+            ts = frame[1] #/ 10e8
+            im = frame[0]
+            
+        except:
+            im = None
+            ts = -1
+            
+        
         
         return im,ts
         
