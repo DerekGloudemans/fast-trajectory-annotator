@@ -42,11 +42,16 @@ import pandas as pd
 import numpy as np
 import torch
 
+
+
+
 class Annotator:
     """ 
     """
     
     def __init__(self,im_directory,hg_path,save_file = None):
+        
+        
         
         #### Initialize frame array
         self.active_direction = -1
@@ -66,6 +71,8 @@ class Annotator:
             # For WB
             if self.active_direction == -1:
                 if (((c == 4) and p%1 == 0  and p< 41 and p > 2  and p != 24) or (c == 3 and p == 24)) and ".h264" in camera:
+                #if (((c == 3 or c==5) and p%1 == 0  and p< 41 and p > 34 ))and ".h264" in camera:
+
                     include_cameras.append(shortname)
 
             if self.active_direction == 1:
@@ -74,7 +81,7 @@ class Annotator:
            
         self.camera_names = include_cameras
         # 1. Get multi-thread frame-loader object
-        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 680)
+        self.b = NVC_Buffer(im_directory,include_cameras,ctx,buffer_lim = 650)
         
         
         # frame indexed data array since we'll plot by frames
@@ -88,7 +95,7 @@ class Annotator:
         # dictionary with dimensions, source camera, number of annotations, current lane, and sink camera for each object
         self.objects = {} 
 
-        self.buffer(50)
+        self.buffer(1)
         
         
         #### get homography
@@ -146,19 +153,20 @@ class Annotator:
     
     
         # load GPS data
-        gps_data_cache = "./data/GPS_10hz.cpkl"
+        #self.gps_data_cache = "./data/GPS_corrected.cpkl"
+        self.gps_data_cache = "./data/GPS_10hz_smooth_attempt.cpkl"
+
         try:
-            with open(gps_data_cache,"rb") as f:
+            with open(self.gps_data_cache,"rb") as f:
                 self.gps = pickle.load(f)
         except:
-            self.load_gps_data()
-            with open(gps_data_cache,"wb") as f:
+            self.load_gps_data2()
+            with open(self.gps_data_cache,"wb") as f:
                 pickle.dump(self.gps,f)
     
         self.find_furthest_gps(direction = -1)
         print("Loaded annotator")
-   
-    
+        
     def get_unused_id(self):
        i = 0
        while i in self.objects.keys():
@@ -221,8 +229,13 @@ class Annotator:
                             
                     self.data[fidx][id][2] = mints
                     
-                        
+    def save_gps(self):
+        #self.gps_data_cache = "./data/GPS_10hz_working.cpkl"
+        with open(self.gps_data_cache,"wb") as f:
+            pickle.dump(self.gps,f)            
    
+        print("Saved GPS data")
+    
     def load_gps_data(self):
         """
         Load GPS file and convert to rcs. 
@@ -391,179 +404,276 @@ class Annotator:
                     
         self.gps = trunc_vehicles
 
-    # def load_gps_data2(self):
-    #     """
-    #     Load GPS file and convert to rcs. 
+    def load_gps_data2(self):
+        """
+        Load GPS file and convert to rcs. 
         
         
-    #     self.gps - dict of dicts, each with CIRCLES_id,dimensions, and array of x,y,time
-    #     """
+        self.gps - dict of dicts, each with CIRCLES_id,dimensions, and array of x,y,time
+        """
         
-    #     # collection = "637517698b5b68fc4fd40c77_CIRCLES_GPS"
-    #     # db_param = {
-    #     #       "host":"10.80.4.91",
-    #     #       "port":27017,
-    #     #       "username": "mongo-admin",
-    #     #       "password": "i24-data-access",
-    #     #       "database_name": "trajectories",      
-    #     #       }
+        # collection = "637517698b5b68fc4fd40c77_CIRCLES_GPS"
+        # db_param = {
+        #       "host":"10.80.4.91",
+        #       "port":27017,
+        #       "username": "mongo-admin",
+        #       "password": "i24-data-access",
+        #       "database_name": "trajectories",      
+        #       }
         
         
-    #     # prd   = DBClient(**db_param,collection_name = collection)
-    #     # preds = list(prd.read_query(None))
-    #     def WGS84_to_TN(points):
-    #         """
-    #         Converts GPS coordiantes (WGS64 reference) to tennessee state plane coordinates (EPSG 2274).
-    #         Transform is expected to be accurate within ~2 feet
+        # prd   = DBClient(**db_param,collection_name = collection)
+        # preds = list(prd.read_query(None))
+        def WGS84_to_TN(points):
+            """
+            Converts GPS coordiantes (WGS64 reference) to tennessee state plane coordinates (EPSG 2274).
+            Transform is expected to be accurate within ~2 feet
             
-    #         points array or tensor of size [n_pts,2]
-    #         returns out - array or tensor of size [n_pts,2]
-    #         """
+            points array or tensor of size [n_pts,2]
+            returns out - array or tensor of size [n_pts,2]
+            """
             
-    #         wgs84=pyproj.CRS("EPSG:4326")
-    #         tnstate=pyproj.CRS("epsg:2274")
-    #         out = pyproj.transform(wgs84,tnstate, points[:,0],points[:,1])
-    #         out = np.array(out).transpose(1,0)
+            wgs84=pyproj.CRS("EPSG:4326")
+            tnstate=pyproj.CRS("epsg:2274")
+            out = pyproj.transform(wgs84,tnstate, points[:,0],points[:,1])
+            out = np.array(out).transpose(1,0)
             
-    #         if type(points) == torch.Tensor:
-    #             out = torch.from_numpy(out)
+            if type(points) == torch.Tensor:
+                out = torch.from_numpy(out)
                 
-    #         return out
+            return out
         
-    #     start_ts = 1668600000
-    #     end_ts = start_ts + 60*60*4
-    #     #gps_data_file = "/home/derek/Data/CIRCLES_GPS/CIRCLES_GPS_ALL.csv"
-    #     gps_data_file = "/home/derek/Data/CIRCLES_GPS/gps_message_raw.csv"
+        start_ts = 1668600000
+        end_ts = start_ts + 60*60*4
+        gps_data_file = "/home/derek/Data/CIRCLES_GPS/gps_message_raw2a.csv"
 
-    #     feet_per_meter = 3.28084
-    #     y_valid = [-150,150]
-    #     x_valid = [0,23000]
-    #     ms_cutoff =  1000000000000
+        feet_per_meter = 3.28084
+        y_valid = [-100,100]
+        x_valid = [0,23000]
+        ms_cutoff =  1000000000000
 
 
-    #     # 2. Load raw GPS data and assemble into dict with one key per object
-    #     # each entry will be array of time, array of x, array of y, array of acc, vehID
-    #     vehicles = {}
+        # 2. Load raw GPS data and assemble into dict with one key per object
+        # each entry will be array of time, array of x, array of y, array of acc, vehID
+        vehicles = {}
 
-    #     # TODO - get data from file
-    #     dataframe = pd.read_csv(gps_data_file,delimiter = ",")
+        # TODO - get data from file
+        dataframe = pd.read_csv(gps_data_file,delimiter = ",")
 
-    #     ts   = dataframe["Systime"].tolist() 
-    #     ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
-    #     lat  = dataframe["Lat"].tolist()
-    #     long = dataframe["Long"].tolist()
-    #     vehid   = dataframe["vin"].tolist()
+        ts   = dataframe["Systime"].tolist() 
+        ts = [(item/1000 if item > ms_cutoff else item) for item in ts]
+        lat  = dataframe["Lat"].tolist()
+        long = dataframe["Long"].tolist()
+        vehid   = dataframe["vin"].tolist()
 
-    #     ts = np.array(ts)# - (6*60*60) # convert from ms to s, then do UTC to CST offset
-    #     lat = np.array(lat)#.astype(float)
-    #     long = np.array(long)#.astype(float)
-    #     vehid = np.array(vehid)#.astype(int)
-    #     # stack_data
+        ts = np.array(ts)# - (6*60*60) # convert from ms to s, then do UTC to CST offset
+        lat = np.array(lat)#.astype(float)
+        long = np.array(long)#.astype(float)
+        vehid = np.array(vehid)#.astype(int)
+        # stack_data
         
-    #     data = []
-    #     for i in range(len(ts)):
-    #         if i% 100000 == 0: print(i, i/len(ts))
+        data = []
+        for i in range(len(ts)):
+            if i% 100000 == 0: print(i, i/len(ts))
             
-    #         try:
-    #             data.append(np.array([float(ts[i]), float(lat[i]),float(long[i]),float(vehid[i])]))
-    #         except: 
-    #             pass
+            try:
+                data.append(np.array([float(ts[i]), float(lat[i]),float(long[i]),float(vehid[i])]))
+            except: 
+                print("Error converting to float, skipping datum...")
+                pass
             
-    #         #if i > 10000: break
-    #     data = np.stack(data)
+            #if i > 100000: break
+        data = np.stack(data)
         
 
-    #     # sort by timestamp
-    #     data = data[data[:,0].argsort(),:]
-    #     # get unique vehids
-    #     ids = np.unique(data[:,-1]).astype(int)
+        # sort by timestamp
+        data = data[data[:,0].argsort(),:]
+        # get unique vehids
+        ids = np.unique(data[:,-1]).astype(int)
 
-    #     # assemble into dictionary
-    #     vehicles = dict([(id,[]) for id in ids])
-    #     for row in data:
-    #         try:
-    #             if row[0] < start_ts or row[0] > end_ts:
-    #                 continue
-    #             #print("Got one")
-    #             id = int(row[-1])
-    #             vehicles[id].append(row)
-    #         except:
-    #             print("Bad Row")
-    #             continue
+        # assemble into dictionary
+        vehicles = dict([(id,[]) for id in ids])
+        for row in data:
+            try:
+                if row[0] < start_ts or row[0] > end_ts:
+                    continue
+                #print("Got one")
+                id = int(row[-1])
+                vehicles[id].append(row)
+            except:
+                print("Bad Row")
+                continue
 
             
-    #     # lastly, stack each vehicle 
-    #     new_vehicles = {}
-    #     for key in vehicles.keys():
-    #         if len(vehicles[key]) == 0:
-    #             continue
-    #         data = np.stack(vehicles[key])
-    #         new_data = {
-    #             "ts":data[:,0],
-    #             "lat":data[:,1],
-    #             "long":data[:,2]
-    #             }
-    #         new_vehicles[key] = new_data
+        # lastly, stack each vehicle 
+        new_vehicles = {}
+        for key in vehicles.keys():
+            if len(vehicles[key]) == 0:
+                continue
+            data = np.stack(vehicles[key])
+            new_data = {
+                "ts":data[:,0],
+                "lat":data[:,1],
+                "long":data[:,2]
+                }
+            new_vehicles[key] = new_data
 
 
-    #     vehicles = new_vehicles
+        vehicles = new_vehicles
+        
+        
 
-    #     # Nissan Rogue 183″ L x 72″ W x 67″ H
-    #     l = 183/12
-    #     w = 72/12
-    #     h = 67/12
+        
+        # Nissan Rogue 183″ L x 72″ W x 67″ H
+        l = 183/12
+        w = 72/12
+        h = 67/12
 
-    #     # 3. Convert data into roadway coordinates
-    #     trunc_vehicles = {}
-    #     for vehid in vehicles.keys():
+        # 3. Convert data into roadway coordinates
+        trunc_vehicles = {}
+        for vehid in vehicles.keys():
             
-    #         #print("Converting vehicle {}".format(vehid))
+            #print("Converting vehicle {}".format(vehid))
             
-    #         data = vehicles[vehid]
-    #         vehid = int(vehid)
-    #         # get data as roadway coordinates
-    #         gps_pts  = torch.from_numpy(np.stack([data["lat"],data["long"]])).transpose(1,0)
-    #         deriv_data = torch.from_numpy(np.stack([data["ts"]])).transpose(1,0)
+            data = vehicles[vehid]
+            vehid = int(vehid)
+            # get data as roadway coordinates
+            gps_pts  = torch.from_numpy(np.stack([data["lat"],data["long"]])).transpose(1,0)
+            deriv_data = torch.from_numpy(np.stack([data["ts"]])).transpose(1,0)
             
-    #         state_pts = WGS84_to_TN(gps_pts)
-    #         state_pts = torch.cat((state_pts,torch.zeros(state_pts.shape[0],1)),dim = 1).unsqueeze(1)
-    #         roadway_pts = self.hg.space_to_state(state_pts)
+            state_pts = WGS84_to_TN(gps_pts)
+            state_pts = torch.cat((state_pts,torch.zeros(state_pts.shape[0],1)),dim = 1).unsqueeze(1)
+            roadway_pts = self.hg.space_to_state(state_pts)
             
-    #         veh_counter = 0
-    #         cur_veh_data = [],[] # for xy and tva
-    #         for r_idx in range (len(roadway_pts)):
-    #             row = roadway_pts[r_idx]
-    #             deriv_row = deriv_data[r_idx]
+            veh_counter = 0
+            cur_veh_data = [],[] # for xy and tva
+            for r_idx in range (len(roadway_pts)):
+                row = roadway_pts[r_idx]
+                deriv_row = deriv_data[r_idx]
                 
-    #             if row[0] > x_valid[0] and row[0] < x_valid[1] and row[1] > y_valid[0] and row[1] < y_valid[1]:
-    #                 cur_veh_data[0].append(row)
-    #                 cur_veh_data[1].append(deriv_row)
+                if row[0] > x_valid[0] and row[0] < x_valid[1] and row[1] > y_valid[0] and row[1] < y_valid[1]:
+                    cur_veh_data[0].append(row)
+                    cur_veh_data[1].append(deriv_row)
                 
-    #             else:
-    #                 # break off trajectory chunk
-    #                 if len(cur_veh_data[0]) > 30:
-    #                     this_road = torch.stack(cur_veh_data[0])
-    #                     this_deriv = torch.stack(cur_veh_data[1])
+                else:
+                    # break off trajectory chunk
+                    if len(cur_veh_data[0]) > 300:
+                        this_road = torch.stack(cur_veh_data[0])
+                        this_deriv = torch.stack(cur_veh_data[1])
                         
-    #                     sub_key = "{}_{}".format(vehid,veh_counter)
-    #                     trunc_vehicles[sub_key] =   {
-    #                      "x": this_road[:,0],
-    #                      "y": this_road[:,1],
-    #                      "ts" :this_deriv[:,0],
-    #                      "start":this_deriv[0,0],
-    #                      "end":this_deriv[-1,0],
-    #                      "id" :vehid,
-    #                      "run":veh_counter,
-    #                      "l":l,
-    #                      "w":w,
-    #                      "h":h,
-    #                      }
+                        sub_key = "{}_{}".format(vehid,veh_counter)
+                        trunc_vehicles[sub_key] =   {
+                          "x": this_road[:,0],
+                          "y": this_road[:,1],
+                          "ts" :this_deriv[:,0],
+                          "start":this_deriv[0,0],
+                          "end":this_deriv[-1,0],
+                          "id" :vehid,
+                          "run":veh_counter,
+                          "l":l,
+                          "w":w,
+                          "h":h,
+                          }
                         
-    #                     veh_counter += 1
-    #                 cur_veh_data = [],[]
+                        veh_counter += 1
+                    cur_veh_data = [],[]
                            
                     
-        # self.gps = trunc_vehicles    
+        # Remove bad data where GPS misses a point and then tries to correct
+        if True:
+            min_gap = 0.08
+            max_gap = 0.25
+            
+            for vid in trunc_vehicles:
+                veh = trunc_vehicles[vid]
+                init_size = len(veh["ts"])
+                removals = []
+                for t in range(1,len(veh["ts"])-1):
+                    if veh["ts"][t+1] - veh["ts"][t] < min_gap:
+                        removals.append(t-1)
+                        removals.append(t)
+                    if veh["ts"][t] - veh["ts"][t-1] > max_gap:
+                        removals.append(t+1)
+                        removals.append(t)
+                #print(removals)        
+                removals = list(set(removals))
+                mask = np.ones(len(veh["ts"])).astype(bool)
+                mask[removals] = False
+                #print(mask)
+                #print(veh["x"][mask])
+                #print(veh["ts"][mask].shape,mask.shape)
+
+                veh["ts"] = veh["ts"][mask]
+                veh["x"] = veh["x"][mask]
+                veh["y"] = veh["y"][mask]
+                
+                print("Obj {}: {} -> {} entries \n\n".format(vid,init_size,len(veh["ts"])))
+        self.gps = trunc_vehicles    
+
+    def rebase_annotations(self):
+        """ 
+        When I ported from 1Hz to 10Hz data, the post ids (eg. 56_4) dont match up (e.g. might by 56_3 now)
+        This function iterates over all manual labels and for each annotation X_Y,
+        searches all GPS X_Z and finds the Z that matches the annotation most closely, then rebases
+        the annotation to X_Z.
+        """
+        obj_mapping = {}
+        import time
+        
+        start = time.time()
+        counter = 0
+        for key in self.objects:
+            
+            # timekeeping
+            elapsed = time.time() - start
+            done_ratio =  counter / len(self.objects) + 1e-06
+            eta = (elapsed / done_ratio) - elapsed
+            
+            print("\rRebasing annotations... ETA {:.1f} sec".format(eta),flush = True, end="\r")
+
+            obj = self.objects[key]
+            obj_map_key = obj["gps_id"]
+            
+            # find a position for that object
+            for frame_data in self.data:
+                if key in frame_data.keys():
+                    x,t = frame_data[key][0],frame_data[key][2] # double check this indexing
+                    break
+                    
+            # find the closest GPS position at a nearby time for the same object
+            mindist = np.inf
+            min_pass_num = None
+            for gps_key in self.gps:
+                if gps_key.split("_")[0] == obj_map_key.split("_")[0]:
+                    
+                    gps_xpos = None
+                    # advance time to find a close position
+                    for g_idx in range(len(self.gps[gps_key]["ts"])):
+                        if np.abs(self.gps[gps_key]["ts"][g_idx] - t) < 1:
+                            gps_xpos = self.gps[gps_key]["x"][g_idx]
+                            break
+                        
+                    
+
+                    # this run is not present at the same time
+                    if gps_xpos is None:
+                        continue
+                    
+                    dist = np.abs(gps_xpos - x)
+                    if dist < mindist:
+                        mindist =  dist
+                        min_pass_num = gps_key
+                
+                    
+                    
+            # record the run / pass number
+            if mindist > 100:
+                print("Possible bad match for object {}/{}".format(key,min_pass_num))
+            self.objects[key]["gps_id"] = min_pass_num
+            counter += 1
+        print("Done")
+        
+        
 
     def quit(self):      
         self.cont = False
@@ -1732,17 +1842,42 @@ class Annotator:
             print("Can't undo")
     
     
-    def plot_traj(self):
+    def plot_traj(self, highlight_id = None):
         
         """ Plot timespace diagram for all GPS tracks. Then add annotation points"""
+        
+        durations = []
+        for gid in self.gps:
+            duration = (max(self.gps[gid]["ts"]) - min(self.gps[gid]["ts"]))/60
+            durations.append(duration)
+            
+        #print(durations)
+        print("Duration stats")
+        print(sum(durations)/len(durations))
+        print(min(durations),max(durations))
+        
+        lengths = []
+        for gid in self.gps:
+            length = (max(self.gps[gid]["x"]) - min(self.gps[gid]["x"]))
+            lengths.append(length)
+            
+        #print(lengths)
+        print("Length stats")
+        print(sum(lengths)/len(lengths))
+        print(min(lengths),max(lengths))
         
         plt.figure(figsize = (30,10))
         colors = np.random.rand(200,3)
         
         for gid in self.gps:
             if self.gps[gid]["y"][0] * self.active_direction > 0:
-                plt.plot(self.gps[gid]["ts"],self.gps[gid]["x"],color = colors[int(gid.split("_")[0])])
+                plt.plot(self.gps[gid]["ts"],self.gps[gid]["x"],color = colors[int(gid.split("_")[0])])#,marker = "x")
             
+        if highlight_id is not None:
+            gid = highlight_id
+            if self.gps[gid]["y"][0] * self.active_direction > 0:
+                plt.plot(self.gps[gid]["ts"],self.gps[gid]["x"],color = colors[int(gid.split("_")[0])], linewidth = 5)
+                
         for frame_data in self.data:
             for did in frame_data:
                 datum = frame_data[did]
@@ -1768,6 +1903,328 @@ class Annotator:
                 plt.scatter(datum[0],datum[1],color = colors[gid])
             
         plt.show()
+
+
+    def examine_error(self):
+        
+        bad = []
+        good = []
+        cutoff = 3
+        
+        for id in self.objects:
+           x_err = []
+           y_err = []
+           gps_id = self.objects[id]["gps_id"]
+            
+           # for each annotation
+           for fidx in range(3600):
+               if id in self.data[fidx].keys():
+                    obj_pos = self.data[fidx][id]
+                    frame_ts = obj_pos[2]
+                   
+                    gpsob = self.gps[gps_id]
+                   
+            
+        
+                    # iterate through timestamps to find ts directly before and after current ts
+                    for t in range(1,len(gpsob["ts"])):
+                        if gpsob["ts"][t] > frame_ts:
+                            break
+                    
+                    x1 = gpsob["x"][t-1]
+                    x2 = gpsob["x"][t]
+                    y1 = gpsob["y"][t-1]
+                    y2 = gpsob["y"][t]
+                    t1 = gpsob["ts"][t-1]
+                    t2 = gpsob["ts"][t]
+                    f1 = (t2-frame_ts)/(t2-t1)
+                    f2 = (frame_ts-t1)/(t2-t1)
+                    
+                    x_interp =  x1*f1 + x2*f2
+                    y_interp =  y1*f1 + y2*f2
+                
+                    x_error = x_interp - obj_pos[0]
+                    y_error = y_interp - obj_pos[1]
+                    x_err.append(x_error)
+                    y_err.append(y_error)
+                    
+           # ravel error statistics
+           x_err = np.array(x_err)
+           y_err = np.array(y_err)
+            
+           xmean = np.mean(x_err)
+           xstd = np.std(x_err)
+           ymean = np.mean(y_err)
+           ystd = np.std(y_err)
+            
+           print("For object {}/{}, x error: {:.2f}ft ({:.2f}ft std) ---- y error {:.2f}ft ({:.2f}ft std)".format(id,gps_id,xmean,xstd,ymean,ystd))
+           if xstd > cutoff:
+               bad.append(xstd)
+           else:
+               good.append(xstd)
+               
+        print("{:.3f}% under {} ft standard deviation x error".format(len(good)/(len(bad)+len(good)), cutoff))
+    
+    def mean_shift_x(self):
+       for id in self.objects:
+          x_err = []
+          y_err = []
+          gps_id = self.objects[id]["gps_id"]
+           
+          # for each annotation
+          for fidx in range(3600):
+              if id in self.data[fidx].keys():
+                   obj_pos = self.data[fidx][id]
+                   frame_ts = obj_pos[2]
+                  
+                   gpsob = self.gps[gps_id]
+                  
+           
+       
+                   # iterate through timestamps to find ts directly before and after current ts
+                   for t in range(1,len(gpsob["ts"])):
+                       if gpsob["ts"][t] > frame_ts:
+                           break
+                   
+                   x1 = gpsob["x"][t-1]
+                   x2 = gpsob["x"][t]
+                   y1 = gpsob["y"][t-1]
+                   y2 = gpsob["y"][t]
+                   t1 = gpsob["ts"][t-1]
+                   t2 = gpsob["ts"][t]
+                   f1 = (t2-frame_ts)/(t2-t1)
+                   f2 = (frame_ts-t1)/(t2-t1)
+                   
+                   x_interp =  x1*f1 + x2*f2
+                   y_interp =  y1*f1 + y2*f2
+               
+                   x_error = x_interp - obj_pos[0]
+                   y_error = y_interp - obj_pos[1]
+                   x_err.append(x_error)
+                   y_err.append(y_error)
+                   
+          # ravel error statistics
+          x_err = np.array(x_err)
+          y_err = np.array(y_err)
+           
+          xmean = np.mean(x_err)
+          xstd = np.std(x_err)
+          ymean = np.mean(y_err)
+          ystd = np.std(y_err)
+           
+       
+          if True: 
+              for i in range(0,len(gpsob["x"])):
+                  gpsob["x"][i] -= xmean
+                  
+    def mean_shift_ts(self):
+        """ 
+        For each trajectory, find the time-shift (one per tracklet) that minimizes the error between 
+        """
+        
+        
+    
+        for id in self.objects:
+            
+           
+           gps_id = self.objects[id]["gps_id"]
+           gpsob = self.gps[gps_id]
+ 
+           best_x_err = np.inf
+           best_list = None
+           best_shift = 0
+           
+           for timeshift in  np.arange(-2,2,0.05):
+               gpsob["ts"] += timeshift
+               x_err = []
+               y_err = []
+                
+               # for each annotation
+               for fidx in range(3600):
+                   if id in self.data[fidx].keys():
+                        obj_pos = self.data[fidx][id]
+                        frame_ts = obj_pos[2]
+                       
+                        
+                
+            
+                        # iterate through timestamps to find ts directly before and after current ts
+                        for t in range(1,len(gpsob["ts"])):
+                            if gpsob["ts"][t] > frame_ts:
+                                break
+                        
+                        x1 = gpsob["x"][t-1]
+                        x2 = gpsob["x"][t]
+                        y1 = gpsob["y"][t-1]
+                        y2 = gpsob["y"][t]
+                        t1 = gpsob["ts"][t-1]
+                        t2 = gpsob["ts"][t]
+                        f1 = (t2-frame_ts)/(t2-t1)
+                        f2 = (frame_ts-t1)/(t2-t1)
+                        
+                        x_interp =  x1*f1 + x2*f2
+                        y_interp =  y1*f1 + y2*f2
+                    
+                        x_error = x_interp - obj_pos[0]
+                        y_error = y_interp - obj_pos[1]
+                        x_err.append(x_error)
+                        y_err.append(y_error)
+                        
+               gpsob["ts"] -= timeshift
+               
+               std = np.std((np.array(x_err)))
+               #print(timeshift,std)
+               if std < best_x_err:
+                   best_list = x_err
+                   best_x_err = std
+                   best_shift = timeshift
+               
+           # ravel error statistics
+           x_err = np.array(best_list)
+           #y_err = np.array(y_err)
+            
+           xmean = np.mean(x_err)
+           xstd = np.std(x_err)
+           #ymean = np.mean(y_err)
+           #ystd = np.std(y_err)
+            
+           print("For object {}/{}, best timeshift {}s, {:.2f}/{:.2f} x err".format(id,gps_id,best_shift,xmean,xstd))
+           gpsob["ts"] += best_shift
+                   
+    
+    
+    def rolling_shift_x(self):
+        """ 
+        Between labeled points n and n-1, linearly interpolate the x-offset between the x
+        offsets at n and n-1. At endpoints, use simply the offset for n or n-1
+        """
+        
+        print("\n\n applying rolling shift x correction")
+        # 1 create list of offsets for each labeled point 
+        
+        for id in self.objects:
+            offsets  = []
+            times = []
+            gps_id = self.objects[id]["gps_id"]
+
+            # for each annotation
+            for fidx in range(3600):
+                if id in self.data[fidx].keys():
+                     obj_pos = self.data[fidx][id]
+                     frame_ts = obj_pos[2]
+                    
+                     gpsob = self.gps[gps_id]
+                    
+             
+         
+                     # iterate through timestamps to find ts directly before and after current ts
+                     for t in range(1,len(gpsob["ts"])):
+                         if gpsob["ts"][t] > frame_ts:
+                             break
+                     
+                     x1 = gpsob["x"][t-1]
+                     x2 = gpsob["x"][t]
+                     #y1 = gpsob["y"][t-1]
+                     #y2 = gpsob["y"][t]
+                     t1 = gpsob["ts"][t-1]
+                     t2 = gpsob["ts"][t]
+                     f1 = (t2-frame_ts)/(t2-t1)
+                     f2 = (frame_ts-t1)/(t2-t1)
+                     
+                     x_interp =  x1*f1 + x2*f2
+                     #y_interp =  y1*f1 + y2*f2
+                 
+                     x_error = x_interp - obj_pos[0]
+                     #y_error = y_interp - obj_pos[1]
+                     offsets.append(x_error)
+                     times.append(frame_ts)
+                     #y_err.append(y_error)
+                     
+            offsets = np.array(offsets)
+            times = np.array(times)
+            
+        
+            # now interpolate the other direction
+            gps_offsets = []
+            gpsob = self.gps[gps_id]
+            for i in range(len(gpsob["x"])):
+                ts = gpsob["ts"][i]
+                x = gpsob["x"][i]
+
+                if ts < times[0]:
+                    gps_offsets.append(offsets[0])
+                    gpsob["x"][i] -= offsets[0]
+                elif ts > times[-1]:
+                    gps_offsets.append(offsets[-1])
+                    gpsob["x"][i] -= offsets[-1]
+                else: # interpolate
+                
+                    tidx = 0
+                    while times[tidx] < ts:
+                        tidx += 1
+                    
+                    t1 = times[tidx-1]
+                    t2 = times[tidx]
+                    x1 = offsets[tidx-1]
+                    x2 = offsets[tidx]
+                    f1 = (t2-ts)/(t2-t1)
+                    f2 = (ts-t1)/(t2-t1)
+                    
+                    gps_off =  x1*f1 + x2*f2
+                    gps_offsets.append(gps_off)
+                    gpsob["x"][i] -= gps_off
+                    
+    
+    def interpolate_y(self):
+        print("\n\n applying rolling shift y correction")
+        # 1 create list of offsets for each labeled point 
+        
+        for id in self.objects:
+            positions  = []
+            times = []
+            # gps_id = self.objects[id]["gps_id"]
+
+            # # for each annotation,ravel all annotations
+            for fidx in range(3600):
+                if id in self.data[fidx].keys():
+                     obj_pos = self.data[fidx][id]
+                     frame_ts = obj_pos[2]
+                     y_pos = obj_pos[1]
+                     positions.append(y_pos)
+                     times.append(frame_ts)
+                
+                     
+            positions = np.array(positions)
+            times = np.array(times)
+            
+        
+            # # now interpolate the other direction
+            # gps_offsets = []
+            gps_id = self.objects[id]["gps_id"]
+            gpsob = self.gps[gps_id]
+            for i in range(len(gpsob["y"])):
+                ts = gpsob["ts"][i]
+                y = gpsob["y"][i]
+
+                if ts < times[0]:
+                    gpsob["y"][i] = positions[0]
+                elif ts > times[-1]:
+                    gpsob["y"][i] = positions[-1]
+                else: # interpolate
+                
+                    tidx = 0
+                    while times[tidx] < ts:
+                        tidx += 1
+                    
+                    t1 = times[tidx-1]
+                    t2 = times[tidx]
+                    y1 = positions[tidx-1]
+                    y2 = positions[tidx]
+                    f1 = (t2-ts)/(t2-t1)
+                    f2 = (ts-t1)/(t2-t1)
+                    
+                    gps_off =  y1*f1 + y2*f2
+                    gpsob["y"][i] = gps_off
 
     def run(self):
         """
@@ -2027,11 +2484,24 @@ class Annotator:
 
 if __name__ == "__main__":
     directory = "/home/derek/Data/1hz"
-    hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230530.cpkl"
-    save_file = "labeled_data.cpkl"
+    #hg_file = "/home/derek/Documents/i24/fast-trajectory-annotator/data/CIRCLES_20_Wednesday_20230530.cpkl"
+    hg_file = "/home/derek/Documents/i24/i24_track/data/homography/CIRCLES_20_Wednesday.cpkl"
+
+    save_file = "labeled_data_sandbox.cpkl"
     ann = Annotator(directory,hg_file,save_file=save_file)  
-    ann.write_timestamps()
-    #ann.plot_traj()
+    #ann.write_timestamps()
+    #ann.plot_traj(highlight_id = "16_1")
     #ann.recount_objects(f1 = 1500)   
-    #ann.run()
+   
+    # ann.mean_shift_x()
+    # ann.mean_shift_ts()
+    # ann.rolling_shift_x()
+    # ann.interpolate_y()
+    # ann.examine_error()
     
+
+    # ann.save_gps()
+    #ann.rebase_annotations()
+    ann.plot_traj()
+    # ann.frame_idx = 90
+    ann.run()
