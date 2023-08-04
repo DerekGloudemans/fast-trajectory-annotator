@@ -73,7 +73,7 @@ class Annotator:
     
     """
     
-    def __init__(self,im_directory,include_cameras,save_dir):
+    def __init__(self,im_directory,include_cameras,save_dir,buffer = True):
         
         
            
@@ -100,8 +100,9 @@ class Annotator:
         
         self.frame_idx = 0
 
-
-        self.buffer(3600)
+        if buffer:
+            self.buffer(3600)
+        else: self.buffer(1)
         
         
         #### Initialize a bunch of other stuff for tool management
@@ -109,7 +110,7 @@ class Annotator:
         self.new = None
         self.clicked = False
         self.clicked_idx = None
-        self.MASK = False
+        self.MASK = True
 
         self.PLAY_PAUSE = False
         self.active_command = "ADD"
@@ -206,7 +207,7 @@ class Annotator:
         #ranges = self.ranges
         
         
-        for i in range(4):
+        for i in range(len(self.camera_names)):
            frame = self.b.frames[self.frame_idx][i]
            frame = frame.copy()
            blur = frame.copy()
@@ -215,6 +216,7 @@ class Annotator:
            
            # plot regions
            for region in self.data[self.camera_names[i]]:
+               if len(region["points"]) ==0: continue
                if region["static"] or (cur_time >= region["start"] and cur_time <= region["end"]):
                    color = (0,40,100)
                    if region["static"]: color = (0,0,255)
@@ -303,6 +305,9 @@ class Annotator:
                frame = cv2.putText(frame,header_text,(30,30),font,1,(255,255,255),1)
                
            plot_frames.append(frame)
+           
+           if True:
+               cv2.imwrite("redacted_frames/{}.png".format(self.camera_names[i]),frame)
        
         # concatenate frames
         n_ims = len(plot_frames)
@@ -324,7 +329,7 @@ class Annotator:
         self.plot_frame = cat_im
     
    
-    
+        
     
        
 
@@ -574,9 +579,40 @@ class Annotator:
   
     
   
+def tile_frames(directory, c = 13, hres = 1080*2):
+    """
+    r - number of rows
+    c - number of columns
+    hres - approx output image depth in pixels
+    """
     
-  
+    paths = [os.path.join(directory,file) for file in os.listdir(directory)]
+    paths.sort()
     
+    n_paths = len(paths)
+    print(n_paths)
+    r = (n_paths // c) + np.ceil((n_paths % c)/100)
+    
+    wres = int(hres *1920/1080 * r/c)
+    
+    single_w = int(wres / r)
+    single_h = int(hres / c)
+    
+    wres = int(single_w * r)
+    hres = int(single_h * c)
+    
+    
+    big_im = np.zeros([hres,wres,3])
+    for idx,path in enumerate(paths):
+        im = cv2.imread(path)
+        im = cv2.resize(im,(single_w,single_h))
+        ridx = int(idx // r)
+        cidx = int(idx %  r)
+        
+        big_im[ridx*single_h:(ridx+1)*single_h  ,   cidx*single_w:(cidx+1)*single_w, :] = im
+        
+    cv2.imwrite("all_frames.png",big_im)
+        
            
 
         
@@ -589,31 +625,61 @@ if __name__ == "__main__":
     existing_save_files = os.listdir(save_dir)
 
 
-    ## this logic should eventually get moved outside of object
+    
     # get list of all cameras available
     camera_names = os.listdir(directory)
     camera_names.sort()
     camera_names.reverse()
     
-    include_cameras = []
-    for camera in camera_names:
-        if ".pts" in camera: continue
-        p = int(camera.split("P")[-1].split("C")[0])
-        c = int(camera.split("C")[-1].split(".")[0])
-        shortname = camera.split(".")[0]
+    if False: # normal redaction mode
+        include_cameras = []
+        for camera in camera_names:
+            if ".pts" in camera: continue
+            p = int(camera.split("P")[-1].split("C")[0])
+            c = int(camera.split("C")[-1].split(".")[0])
+            shortname = camera.split(".")[0]
+            
+            if p > 40: continue
+            if c > 6:  continue 
         
-        if p > 40: continue
-        if c > 6:  continue 
-    
-        if shortname + ".cpkl" not in existing_save_files: 
-            include_cameras.append(shortname)
+            if shortname + ".cpkl" not in existing_save_files: 
+                include_cameras.append(shortname)
+            
+            if len(include_cameras) == 4:
+                break
+        print(include_cameras)
         
-        if len(include_cameras) == 4:
-            break
-    print(include_cameras)
+        #Override
+        #include_cameras = ["P03C04","P03C03","P03C02","P03C01"]
+        
+        ann = Annotator(directory,include_cameras,save_dir,buffer = True)  
+        ann.run()
+        
+    if False: # frame generation mode
+
     
-    #Override
-    #include_cameras = ["P03C04","P03C03","P03C02","P03C01"]
+        include_cameras = []
+        for camera in camera_names:
+            if ".pts" in camera: continue
+            p = int(camera.split("P")[-1].split("C")[0])
+            c = int(camera.split("C")[-1].split(".")[0])
+            shortname = camera.split(".")[0]
+            
+            if p > 40: continue
+            if c > 6:  continue 
+        
+            if not os.path.exists("redacted_frames/{}.png".format(shortname)): 
+                  include_cameras.append(shortname)
+            
+           
+        
+        for item in include_cameras:
+            item = [item]
+            print(item)
+            ann = Annotator(directory,item,save_dir,buffer = False)  
+            ann.plot()
+            del ann
     
-    ann = Annotator(directory,include_cameras,save_dir)  
-    ann.run()
+    if True:
+        directory = "redacted_frames"
+        tile_frames(directory)

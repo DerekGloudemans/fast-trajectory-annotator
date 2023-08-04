@@ -154,7 +154,7 @@ class Annotator:
     
         # load GPS data
         #self.gps_data_cache = "./data/GPS_corrected.cpkl"
-        self.gps_data_cache = "./data/GPS_10hz_smooth_attempt.cpkl"
+        self.gps_data_cache = "./data/GPS_10hz_smooth_CORRECTED.cpkl"
 
         try:
             with open(self.gps_data_cache,"rb") as f:
@@ -1956,8 +1956,9 @@ class Annotator:
            xstd = np.std(x_err)
            ymean = np.mean(y_err)
            ystd = np.std(y_err)
-            
-           print("For object {}/{}, x error: {:.2f}ft ({:.2f}ft std) ---- y error {:.2f}ft ({:.2f}ft std)".format(id,gps_id,xmean,xstd,ymean,ystd))
+           
+           if xstd > 1 or xmean > 1 or ymean > 1 or ystd > 1:
+               print("For object {}/{}, x error: {:.2f}ft ({:.2f}ft std) ---- y error {:.2f}ft ({:.2f}ft std)".format(id,gps_id,xmean,xstd,ymean,ystd))
            if xstd > cutoff:
                bad.append(xstd)
            else:
@@ -2493,15 +2494,17 @@ if __name__ == "__main__":
     #ann.plot_traj(highlight_id = "16_1")
     #ann.recount_objects(f1 = 1500)   
    
+    
+    
     # ann.mean_shift_x()
     # ann.mean_shift_ts()
     # ann.rolling_shift_x()
     # ann.interpolate_y()
-    # ann.examine_error()
+    #ann.examine_error()
     
 
     # ann.save_gps()
     #ann.rebase_annotations()
     ann.plot_traj()
     # ann.frame_idx = 90
-    ann.run()
+    #ann.run()
